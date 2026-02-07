@@ -3,11 +3,12 @@ import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 
 import type {
+  ApprovalRecord,
   ExecutionPlan,
   PlanSideEffectType,
   WorkItem,
 } from "@delegate/domain";
-import type { PlanStore, WorkItemStore } from "@delegate/ports";
+import type { ApprovalStore, PlanStore, WorkItemStore } from "@delegate/ports";
 
 type WorkItemRow = {
   id: string;
@@ -31,7 +32,21 @@ type PlanRow = {
   created_at: string;
 };
 
-export class SqliteWorkItemStore implements WorkItemStore, PlanStore {
+type ApprovalRow = {
+  id: string;
+  work_item_id: string;
+  action_type: string;
+  payload_hash: string;
+  status: string;
+  requested_at: string;
+  expires_at: string;
+  consumed_at: string | null;
+  decision_reason: string | null;
+};
+
+export class SqliteWorkItemStore
+  implements WorkItemStore, PlanStore, ApprovalStore
+{
   private db: Database | null = null;
 
   constructor(private readonly dbPath: string) {}
@@ -73,6 +88,23 @@ export class SqliteWorkItemStore implements WorkItemStore, PlanStore {
         requires_approval INTEGER NOT NULL,
         created_at TEXT NOT NULL
       );
+    `);
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS approvals (
+        id TEXT PRIMARY KEY,
+        work_item_id TEXT NOT NULL,
+        action_type TEXT NOT NULL,
+        payload_hash TEXT NOT NULL,
+        status TEXT NOT NULL,
+        requested_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        consumed_at TEXT,
+        decision_reason TEXT
+      );
+    `);
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS approvals_work_item_status_idx
+      ON approvals(work_item_id, status);
     `);
     this.db = db;
   }
@@ -223,6 +255,134 @@ export class SqliteWorkItemStore implements WorkItemStore, PlanStore {
       sideEffects: JSON.parse(row.side_effects_json) as PlanSideEffectType[],
       requiresApproval: row.requires_approval === 1,
       createdAt: row.created_at,
+    };
+  }
+
+  async createApproval(record: ApprovalRecord): Promise<void> {
+    this.ensureDb()
+      .query(
+        `
+          INSERT INTO approvals (
+            id,
+            work_item_id,
+            action_type,
+            payload_hash,
+            status,
+            requested_at,
+            expires_at,
+            consumed_at,
+            decision_reason
+          ) VALUES (
+            $id,
+            $work_item_id,
+            $action_type,
+            $payload_hash,
+            $status,
+            $requested_at,
+            $expires_at,
+            $consumed_at,
+            $decision_reason
+          )
+        `,
+      )
+      .run({
+        id: record.id,
+        work_item_id: record.workItemId,
+        action_type: record.actionType,
+        payload_hash: record.payloadHash,
+        status: record.status,
+        requested_at: record.requestedAt,
+        expires_at: record.expiresAt,
+        consumed_at: record.consumedAt,
+        decision_reason: record.decisionReason,
+      });
+  }
+
+  async getApprovalById(approvalId: string): Promise<ApprovalRecord | null> {
+    const row = this.ensureDb()
+      .query(
+        `
+          SELECT
+            id,
+            work_item_id,
+            action_type,
+            payload_hash,
+            status,
+            requested_at,
+            expires_at,
+            consumed_at,
+            decision_reason
+          FROM approvals
+          WHERE id = $id
+        `,
+      )
+      .get({ id: approvalId }) as ApprovalRow | null;
+
+    return row ? this.mapApprovalRow(row) : null;
+  }
+
+  async getLatestApprovalByWorkItemId(
+    workItemId: string,
+  ): Promise<ApprovalRecord | null> {
+    const row = this.ensureDb()
+      .query(
+        `
+          SELECT
+            id,
+            work_item_id,
+            action_type,
+            payload_hash,
+            status,
+            requested_at,
+            expires_at,
+            consumed_at,
+            decision_reason
+          FROM approvals
+          WHERE work_item_id = $work_item_id
+          ORDER BY requested_at DESC
+          LIMIT 1
+        `,
+      )
+      .get({ work_item_id: workItemId }) as ApprovalRow | null;
+
+    return row ? this.mapApprovalRow(row) : null;
+  }
+
+  async updateApprovalStatus(
+    approvalId: string,
+    status: ApprovalRecord["status"],
+    consumedAt: string | null,
+    decisionReason: string | null,
+  ): Promise<void> {
+    this.ensureDb()
+      .query(
+        `
+          UPDATE approvals
+          SET status = $status,
+              consumed_at = $consumed_at,
+              decision_reason = $decision_reason
+          WHERE id = $id
+        `,
+      )
+      .run({
+        id: approvalId,
+        status,
+        consumed_at: consumedAt,
+        decision_reason: decisionReason,
+      });
+  }
+
+  private mapApprovalRow(row: ApprovalRow): ApprovalRecord {
+    return {
+      id: row.id,
+      workItemId: row.work_item_id,
+      actionType: row.action_type as ApprovalRecord["actionType"],
+      payloadHash: row.payload_hash,
+      status: row.status as ApprovalRecord["status"],
+      requestedAt: row.requested_at,
+      expiresAt: row.expires_at,
+      consumedAt: row.consumed_at,
+      decisionReason: row.decision_reason,
     };
   }
 

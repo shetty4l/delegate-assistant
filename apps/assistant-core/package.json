@@ -14,6 +14,7 @@
     "@delegate/adapters-telegram": "workspace:*",
     "@delegate/audit": "workspace:*",
     "@delegate/domain": "workspace:*",
+    "@delegate/policy": "workspace:*",
     "@delegate/ports": "workspace:*",
     "effect": "^3.17.14"
   }

@@ -1,9 +1,13 @@
 import type {
+  ApprovalRecord,
+  ApprovalRejectReason,
+  ApprovalStatus,
   AuditEvent,
   ExecutionPlan,
   ExecutionPlanDraft,
   InboundMessage,
   OutboundMessage,
+  PolicyDecision,
   WorkItem,
   WorkItemStatus,
 } from "@delegate/domain";
@@ -23,6 +27,20 @@ export interface WorkItemStore {
 export interface PlanStore {
   createPlan(plan: ExecutionPlan): Promise<void>;
   getPlanByWorkItemId(workItemId: string): Promise<ExecutionPlan | null>;
+}
+
+export interface ApprovalStore {
+  createApproval(record: ApprovalRecord): Promise<void>;
+  getApprovalById(approvalId: string): Promise<ApprovalRecord | null>;
+  getLatestApprovalByWorkItemId(
+    workItemId: string,
+  ): Promise<ApprovalRecord | null>;
+  updateApprovalStatus(
+    approvalId: string,
+    status: ApprovalStatus,
+    consumedAt: string | null,
+    decisionReason: string | null,
+  ): Promise<void>;
 }
 
 export interface AuditPort {
@@ -49,3 +67,11 @@ export type PlanInput = {
 export interface ModelPort {
   plan(input: PlanInput): Promise<ExecutionPlanDraft>;
 }
+
+export interface PolicyEngine {
+  evaluate(plan: ExecutionPlanDraft): Promise<PolicyDecision>;
+}
+
+export type ApprovalValidationResult =
+  | { ok: true; approval: ApprovalRecord }
+  | { ok: false; reason: ApprovalRejectReason };

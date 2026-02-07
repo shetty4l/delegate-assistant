@@ -8,8 +8,8 @@ Provide an execution-first plan for delivering v0 in small vertical slices with 
 ## Milestone Status
 - M1 Foundation Tracer Bullet: complete
 - M2 Telegram Delegation + Planning: complete
-- M3 Policy + Approval Integrity: next
-- M4 Approval-Gated GitHub PR Publish: not started
+- M3 Policy + Approval Integrity: complete
+- M4 Approval-Gated GitHub PR Publish: next
 - M5 Explainability, Recovery, and Test Matrix: not started
 
 ## Non-Goals (v0)
@@ -114,6 +114,12 @@ Template:
 - Decisions:
 - Files changed:
 - Blockers/notes:
+
+2026-02-07
+- Completed: M3 policy and approval integrity with approval requests, one-time approval consumption, expiry and payload-hash checks, denial terminal behavior, and structured lifecycle logs.
+- Decisions: Added `@delegate/policy` as a default policy engine package; retained strict orchestrator gate for `/approve` and `/deny`; kept execution message explicit that publish remains gated until M4.
+- Files changed: `apps/assistant-core/src/main.ts`, `apps/assistant-core/src/worker.ts`, `apps/assistant-core/src/worker.test.ts`, `apps/assistant-core/package.json`, `packages/domain/src/index.ts`, `packages/ports/src/index.ts`, `packages/policy/package.json`, `packages/policy/src/index.ts`, `packages/adapters-sqlite/src/index.ts`, `packages/adapters-sqlite/src/index.test.ts`, `docs/00-09_meta/00-index.md`, `docs/30-39_execution/30-v0-working-plan.md`, `bun.lock`.
+- Blockers/notes: Live worker logs now stream JSON lines to stdout and include correlation ids (`workItemId`, `traceId`, `approvalId`).
 
 2026-02-07
 - Completed: M2 Telegram delegation + planning slice with real Telegram long polling adapter, deterministic planner stub, persisted plans, command router, and status responses.

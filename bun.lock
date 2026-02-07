@@ -22,6 +22,7 @@
         "@delegate/adapters-telegram": "workspace:*",
         "@delegate/audit": "workspace:*",
         "@delegate/domain": "workspace:*",
+        "@delegate/policy": "workspace:*",
         "@delegate/ports": "workspace:*",
         "effect": "^3.17.14",
       },
@@ -56,6 +57,13 @@
     },
     "packages/domain": {
       "name": "@delegate/domain",
+    },
+    "packages/policy": {
+      "name": "@delegate/policy",
+      "dependencies": {
+        "@delegate/domain": "workspace:*",
+        "@delegate/ports": "workspace:*",
+      },
     },
     "packages/ports": {
       "name": "@delegate/ports",
@@ -98,6 +106,8 @@
     "@delegate/audit": ["@delegate/audit@workspace:packages/audit"],
 
     "@delegate/domain": ["@delegate/domain@workspace:packages/domain"],
+
+    "@delegate/policy": ["@delegate/policy@workspace:packages/policy"],
 
     "@delegate/ports": ["@delegate/ports@workspace:packages/ports"],
 
