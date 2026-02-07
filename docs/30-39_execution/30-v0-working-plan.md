@@ -103,6 +103,12 @@ Template:
 - Blockers/notes:
 
 2026-02-08
+- Completed: Executed R4 boundary cleanup by removing legacy workflow-era packages that were out of the active relay runtime path.
+- Decisions: Archived-by-removal for unused modules to keep active repository surface aligned with documented runtime scope and CI/lint signals.
+- Files changed: `packages/adapters-github/package.json`, `packages/adapters-github/src/index.ts`, `packages/adapters-sqlite/package.json`, `packages/adapters-sqlite/src/index.ts`, `packages/adapters-sqlite/src/index.test.ts`, `packages/policy/package.json`, `packages/policy/src/index.ts`, `packages/audit/package.json`, `packages/audit/src/index.ts`, `docs/30-39_execution/30-v0-working-plan.md`.
+- Blockers/notes: None.
+
+2026-02-08
 - Completed: Aligned active working plan to the thin relay runtime and replaced stale workflow-era milestones with relay-native milestones (R1-R4).
 - Decisions: Declared explicit active runtime surface and legacy/out-of-path boundary; made docs-to-runtime alignment an explicit milestone gate.
 - Files changed: `docs/30-39_execution/30-v0-working-plan.md`.
