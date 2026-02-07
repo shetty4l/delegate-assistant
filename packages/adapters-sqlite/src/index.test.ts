@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { ExecutionPlan, WorkItem } from "@delegate/domain";
+import type { ApprovalRecord, ExecutionPlan, WorkItem } from "@delegate/domain";
 
 import { SqliteWorkItemStore } from "./index";
 
@@ -56,5 +56,41 @@ describe("SqliteWorkItemStore", () => {
 
     expect(savedWorkItem?.status).toBe("triaged");
     expect(savedPlan).toEqual(plan);
+  });
+
+  test("persists approvals and supports status updates", async () => {
+    const now = new Date().toISOString();
+    const workItem: WorkItem = {
+      id: "work-item-approval",
+      traceId: "trace-approval",
+      status: "approval_pending",
+      summary: "Publish a PR",
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const approval: ApprovalRecord = {
+      id: "approval-1",
+      workItemId: workItem.id,
+      actionType: "publish_pr",
+      payloadHash: "abc123",
+      status: "pending",
+      requestedAt: now,
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      consumedAt: null,
+      decisionReason: null,
+    };
+
+    await store.create(workItem);
+    await store.createApproval(approval);
+
+    const pending = await store.getApprovalById(approval.id);
+    expect(pending).toEqual(approval);
+
+    await store.updateApprovalStatus(approval.id, "approved", now, "APPROVED");
+
+    const latest = await store.getLatestApprovalByWorkItemId(workItem.id);
+    expect(latest?.status).toBe("approved");
+    expect(latest?.decisionReason).toBe("APPROVED");
   });
 });

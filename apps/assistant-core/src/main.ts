@@ -2,6 +2,7 @@ import { DeterministicModelStub } from "@delegate/adapters-model-stub";
 import { SqliteWorkItemStore } from "@delegate/adapters-sqlite";
 import { TelegramLongPollingAdapter } from "@delegate/adapters-telegram";
 import { JsonlAuditPort } from "@delegate/audit";
+import { DefaultPolicyEngine } from "@delegate/policy";
 import { Effect } from "effect";
 
 import { loadConfig } from "./config";
@@ -13,6 +14,7 @@ const config = loadConfig();
 const workItemStore = new SqliteWorkItemStore(config.sqlitePath);
 const auditPort = new JsonlAuditPort(config.auditLogPath);
 const modelPort = new DeterministicModelStub();
+const policyEngine = new DefaultPolicyEngine();
 
 const boot = Effect.gen(function* () {
   yield* Effect.tryPromise({
@@ -43,6 +45,8 @@ const boot = Effect.gen(function* () {
         modelPort,
         workItemStore,
         planStore: workItemStore,
+        approvalStore: workItemStore,
+        policyEngine,
         auditPort,
       },
       config.telegramPollIntervalMs,

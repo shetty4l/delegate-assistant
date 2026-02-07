@@ -1,4 +1,10 @@
-export type WorkItemStatus = "delegated" | "triaged" | "cancelled";
+export type WorkItemStatus =
+  | "delegated"
+  | "triaged"
+  | "approval_pending"
+  | "approved"
+  | "denied"
+  | "cancelled";
 
 export type WorkItem = {
   id: string;
@@ -32,6 +38,43 @@ export type ExecutionPlan = {
   createdAt: string;
 } & ExecutionPlanDraft;
 
+export type PolicyDecisionType = "allow" | "deny" | "requires_approval";
+
+export type PolicyReasonCode =
+  | "LOW_RISK_ALLOWED"
+  | "MISSING_APPROVAL"
+  | "GUARDRAIL_PROTECTED_PATH"
+  | "DENIED_PREVIOUSLY"
+  | "INSUFFICIENT_SCOPE";
+
+export type PolicyDecision = {
+  decision: PolicyDecisionType;
+  reasonCode: PolicyReasonCode;
+};
+
+export type ApprovalActionType = "publish_pr";
+
+export type ApprovalStatus = "pending" | "approved" | "denied" | "expired";
+
+export type ApprovalRecord = {
+  id: string;
+  workItemId: string;
+  actionType: ApprovalActionType;
+  payloadHash: string;
+  status: ApprovalStatus;
+  requestedAt: string;
+  expiresAt: string;
+  consumedAt: string | null;
+  decisionReason: string | null;
+};
+
+export type ApprovalRejectReason =
+  | "NOT_FOUND"
+  | "EXPIRED"
+  | "REPLAYED"
+  | "MISMATCH"
+  | "ALREADY_DENIED";
+
 export type InboundMessage = {
   chatId: string;
   text: string;
@@ -47,7 +90,11 @@ export type OutboundMessage = {
 export type AuditEventType =
   | "work_item.delegated"
   | "work_item.triaged"
-  | "plan.created";
+  | "plan.created"
+  | "approval.requested"
+  | "approval.granted"
+  | "approval.denied"
+  | "approval.rejected";
 
 export type AuditEvent = {
   eventId: string;
@@ -63,8 +110,11 @@ const allowedTransitions: Record<
   WorkItemStatus,
   ReadonlySet<WorkItemStatus>
 > = {
-  delegated: new Set(["triaged", "cancelled"]),
-  triaged: new Set(["cancelled"]),
+  delegated: new Set(["triaged", "approval_pending", "cancelled"]),
+  triaged: new Set(["approval_pending", "approved", "cancelled"]),
+  approval_pending: new Set(["approved", "denied", "cancelled"]),
+  approved: new Set(["cancelled"]),
+  denied: new Set(["cancelled"]),
   cancelled: new Set([]),
 };
 

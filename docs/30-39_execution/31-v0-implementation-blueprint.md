@@ -12,6 +12,8 @@ This document defines the concrete build plan, package layout, and implementatio
 - Quality gates are centralized under `bun run verify` and enforced in CI.
 - M2 is implemented with real Telegram long polling and a deterministic `ModelPort.plan` stub; real OpenAI integration is deferred.
 - M2 command behavior: `/status` is active, while `/approve` and `/deny` are explicit placeholders until M3 approval integrity is wired.
+- M3 implements policy decisions plus approval integrity checks (one-time consumption, expiry, payload-hash validation) with auditable approval events.
+- M3 adds structured JSON lifecycle logs to stdout for live operator visibility with correlation IDs.
 
 ## 1. Monorepo Layout
 
