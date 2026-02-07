@@ -27,6 +27,12 @@ Provide an execution-first plan for delivering v0 in small vertical slices with 
 - UX principle: language-first, commands-last (slash commands remain fallback)
 - Approval UX contract: always render `Approve / Revise / Deny`
 - Context-bound natural confirmations (for example, "go ahead") are valid only when an approval is actively pending
+- M6 revise behavior regenerates both plan and artifact, then issues a fresh approval payload hash
+- M6 natural approval/denial uses a strict allow-list phrase set (expand later with telemetry)
+- M6 `details` is one-shot intent (no persistent verbose mode)
+- M6 discussion-only intent suppresses plan/artifact generation until user explicitly asks for a plan
+- M6 strict natural confirmation starter set: approve (`approve`, `go ahead`, `yes, approve`, `ship it`) and deny (`deny`, `no, deny`, `stop this`, `do not proceed`)
+- Early phases keep assistant self-update code application operator-managed (manual apply)
 - Memory namespace: global
 - Engram integration mode: external local service (no auth) with surfaced, rate-limited outage notices
 - `CRITICAL` actions require additional high-signal confirmation phrase
@@ -99,14 +105,19 @@ Scope:
 - Natural-language-first intent routing (`plan`, `execute`, `approve`, `deny`, `revise`, `status`, `details`) with slash commands as fallback
 - Compact Telegram response composer (short default, expanded details on demand)
 - Explicit approval prompt contract with `Approve / Revise / Deny`
-- Freeform revise loop for plan/payload updates before execution
-- Context-bound approval phrase handling and improved status clarity
+- Freeform revise loop that regenerates both plan and artifact, then rebinds approval via a fresh payload hash
+- Context-bound natural approval/denial handling using a strict phrase allow-list and improved status clarity
+- One-shot `details` intent that returns expanded output only for that request
+- Discussion-only intent path (`discuss`/`brainstorm`) that collaborates without generating plan/artifact until requested
 
 Exit criteria:
 - Typical delegation and approval flows work without requiring slash commands
 - Telegram responses are concise by default and avoid boilerplate dumps
-- `Revise` supports freeform text and updates the proposed execution payload before approval
-- Natural "go ahead" only succeeds when tied to the currently pending approval
+- `Revise` supports freeform text, regenerates plan + artifact, and invalidates superseded pending approvals
+- Natural confirmations (for example, "go ahead") only succeed when tied to exactly one currently pending approval
+- `details` expands output on demand without toggling persistent verbose mode
+- Discussion-only requests avoid plan/artifact generation until the user asks to propose a plan
+- Natural approval/denial phrases outside the strict allow-list are treated as non-authoritative and trigger clarification
 
 ### M7 - Adaptive Memory via Engram
 Scope:
@@ -158,6 +169,24 @@ Template:
 - Blockers/notes: M7 depends on wiring `MemoryPort` + Engram adapter and forget-by-id orchestration in assistant runtime.
 
 2026-02-07
+- Completed: Locked M6 interaction defaults for revise regeneration, strict natural confirmation phrases, and one-shot details behavior.
+- Decisions: `Revise` always regenerates plan + artifact with fresh approval hash; natural approval/denial remains strict allow-list for safety; `details` is one-shot rather than persistent mode.
+- Files changed: `docs/30-39_execution/30-v0-working-plan.md`, `docs/30-39_execution/31-v0-implementation-blueprint.md`.
+- Blockers/notes: Phrase allow-list expansion is intentionally deferred until telemetry indicates meaningful misses.
+
+2026-02-07
+- Completed: Expanded M6 acceptance criteria with discussion-only behavior and locked strict starter phrase set for natural approval/denial.
+- Decisions: Added explicit discuss-first mode (`discuss`/`brainstorm`) that suppresses plan/artifact generation until requested; locked starter allow-list phrases; confirmed manual self-update application in early phases.
+- Files changed: `docs/10-19_product/10-v0-requirements.md`, `docs/30-39_execution/30-v0-working-plan.md`, `docs/30-39_execution/31-v0-implementation-blueprint.md`.
+- Blockers/notes: Automatic merge detection and apply/restart orchestration remain intentionally deferred.
+
+2026-02-07
+- Completed: Implemented M6 conversation-first slice for strict natural intents, discussion mode, one-shot details intent routing, compact default plan replies, and revise-triggered regeneration with approval supersession.
+- Decisions: Natural approval/denial resolves only when exactly one pending approval exists; discussion mode remains in-memory per chat session for v0; revise regenerates with existing work item summary context.
+- Files changed: `apps/assistant-core/src/worker.ts`, `apps/assistant-core/src/worker.test.ts`, `docs/30-39_execution/30-v0-working-plan.md`.
+- Blockers/notes: Discussion mode is not persisted across process restarts in v0.
+
+2026-02-07
 - Completed: M4 approval-gated PR publish plus model generation integration with `ModelPort.plan` + `ModelPort.generate`, repo-relative single-file artifacts, fail-fast model behavior, GitHub publish adapter (`branch -> commit -> push -> PR`), and Telegram PR URL response on approval.
 - Decisions: Kept implementation lean for personal use (no plugin ecosystem), used `opencode` CLI model adapter without API key, enforced repo-relative generated file paths, chose fail-fast behavior on model errors, and deferred timeouts/retries plus multi-file generation.
 - Files changed: `apps/assistant-core/src/config.ts`, `apps/assistant-core/src/main.ts`, `apps/assistant-core/src/worker.ts`, `apps/assistant-core/src/worker.test.ts`, `apps/assistant-core/package.json`, `packages/domain/src/index.ts`, `packages/ports/src/index.ts`, `packages/adapters-model-stub/src/index.ts`, `packages/adapters-sqlite/src/index.ts`, `packages/adapters-sqlite/src/index.test.ts`, `packages/adapters-model-opencode-cli/package.json`, `packages/adapters-model-opencode-cli/src/index.ts`, `packages/adapters-github/package.json`, `packages/adapters-github/src/index.ts`, `bun.lock`.
@@ -192,3 +221,21 @@ Template:
 - Decisions: Kept docs validation as one command (`docs:check`) with local link checks only; CI runs on pull requests and pushes to `main`; no local git hooks for now.
 - Files changed: `.github/workflows/ci.yml`, `.github/pull_request_template.md`, `package.json`, `apps/assistant-core/package.json`, `biome.json`, `.remarkrc.json`, `.gitignore`.
 - Blockers/notes: None.
+
+2026-02-07
+- Completed: Switched runtime configuration to JSON-file-first loading with strict fail-fast behavior and env override precedence.
+- Decisions: Config source defaults to `~/.config/delegate-assistant/config.json`; optional override path is `DELEGATE_CONFIG_PATH`; boot now logs config source and override count; execution intent threshold is file/env configurable.
+- Files changed: `apps/assistant-core/src/config.ts`, `apps/assistant-core/src/main.ts`, `config/config.example.json`, `docs/30-39_execution/31-v0-implementation-blueprint.md`, `docs/30-39_execution/30-v0-working-plan.md`.
+- Blockers/notes: Local runtime now requires creating a config file before startup.
+
+2026-02-07
+- Completed: Switched Telegram runtime to conversation-first behavior and removed operational slash-command workflow except first-message `/start`.
+- Decisions: Non-`/start` messages now flow through model `respond`; casual chat no longer creates work items; execution proposals are persisted only when confidence passes threshold; natural `Approve/Revise/Deny` remain context-bound to pending approvals.
+- Files changed: `apps/assistant-core/src/worker.ts`, `apps/assistant-core/src/worker.test.ts`, `packages/domain/src/index.ts`, `packages/ports/src/index.ts`, `packages/adapters-model-opencode-cli/src/index.ts`, `packages/adapters-model-stub/src/index.ts`, `apps/assistant-core/src/main.ts`, `docs/30-39_execution/31-v0-implementation-blueprint.md`, `docs/30-39_execution/30-v0-working-plan.md`.
+- Blockers/notes: Engram-backed persistence is still pending integration; current conversation context is in-memory only.
+
+2026-02-07
+- Completed: Relaxed execution UX so routine local file changes are applied directly while publish/destructive paths remain confirmation-gated.
+- Decisions: PR publishing now requires explicit publish-intent plus preview (branch/title/body) and approval; routine local edits auto-apply unless `previewDiffFirst=true`; destructive local intents require confirmation.
+- Files changed: `apps/assistant-core/src/worker.ts`, `apps/assistant-core/src/worker.test.ts`, `apps/assistant-core/src/main.ts`, `apps/assistant-core/src/config.ts`, `config/config.example.json`, `docs/30-39_execution/31-v0-implementation-blueprint.md`, `docs/30-39_execution/30-v0-working-plan.md`.
+- Blockers/notes: Action classification currently relies on intent heuristics (`publish` and destructive keyword patterns) and should later be replaced with model-side structured action typing.

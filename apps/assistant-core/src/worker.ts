@@ -1,12 +1,14 @@
+import { mkdir } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
+
 import type {
   ApprovalRecord,
   AuditEvent,
   ExecutionPlan,
   ExecutionPlanDraft,
   GeneratedFileArtifact,
-  GenerateResult,
   InboundMessage,
-  PolicyDecision,
+  ModelTurnResponse,
   WorkItem,
 } from "@delegate/domain";
 import type {
@@ -28,12 +30,21 @@ const sleep = (ms: number): Promise<void> =>
 
 const nowIso = (): string => new Date().toISOString();
 
-type Command =
-  | { type: "approve"; approvalId: string | null }
-  | { type: "deny"; approvalId: string | null }
-  | { type: "status"; workItemId: string | null }
-  | { type: "explain"; workItemId: string | null }
-  | { type: "delegate"; text: string };
+const approvalActionType = "publish_pr" as const;
+
+const naturalApprovePhrases = new Set([
+  "approve",
+  "go ahead",
+  "yes approve",
+  "ship it",
+]);
+
+const naturalDenyPhrases = new Set([
+  "deny",
+  "no deny",
+  "stop this",
+  "do not proceed",
+]);
 
 type WorkerDeps = {
   chatPort: ChatPort;
@@ -47,7 +58,34 @@ type WorkerDeps = {
   vcsPort: VcsPort;
 };
 
+type WorkerOptions = {
+  executionIntentConfidenceThreshold?: number;
+  assistantRepoPath?: string;
+  previewDiffFirst?: boolean;
+};
+
 type LogFields = Record<string, string | number | boolean | null>;
+
+type ParsedAction =
+  | { type: "start" }
+  | { type: "approve" }
+  | { type: "deny" }
+  | { type: "revise"; text: string }
+  | { type: "chat"; text: string };
+
+type ChatState = {
+  history: string[];
+  pendingApprovalId: string | null;
+};
+
+type PendingLocalAction = {
+  artifact: GeneratedFileArtifact;
+  originalRequest: string;
+};
+
+const chatStateByChatId = new Map<string, ChatState>();
+const chatMessageCountByChatId = new Map<string, number>();
+const pendingLocalActionByChatId = new Map<string, PendingLocalAction>();
 
 const logInfo = (event: string, fields: LogFields = {}): void => {
   console.log(
@@ -69,6 +107,75 @@ const logError = (event: string, fields: LogFields = {}): void => {
   );
 };
 
+const normalizePhrase = (text: string): string =>
+  text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const isRevisePhrase = (normalized: string): boolean =>
+  normalized.startsWith("revise ") || normalized.startsWith("change ");
+
+const publishIntentPattern =
+  /\b(open\s+a\s+pr|open\s+pr|pull\s+request|create\s+pr|publish|push|merge|release)\b/i;
+
+const destructiveIntentPattern = /\b(delete|remove|drop|rm\s+-rf|wipe)\b/i;
+
+const isPublishIntent = (text: string): boolean =>
+  publishIntentPattern.test(text);
+
+const isDestructiveIntent = (text: string): boolean =>
+  destructiveIntentPattern.test(text);
+
+const parseAction = (text: string): ParsedAction => {
+  const trimmed = text.trim();
+  if (trimmed.toLowerCase() === "/start") {
+    return { type: "start" };
+  }
+
+  const normalized = normalizePhrase(trimmed);
+  if (naturalApprovePhrases.has(normalized)) {
+    return { type: "approve" };
+  }
+
+  if (naturalDenyPhrases.has(normalized)) {
+    return { type: "deny" };
+  }
+
+  if (isRevisePhrase(normalized)) {
+    const reviseText = trimmed.split(/\s+/).slice(1).join(" ").trim();
+    return { type: "revise", text: reviseText };
+  }
+
+  return { type: "chat", text: trimmed };
+};
+
+const getChatState = (chatId: string): ChatState => {
+  const existing = chatStateByChatId.get(chatId);
+  if (existing) {
+    return existing;
+  }
+
+  const initial: ChatState = {
+    history: [],
+    pendingApprovalId: null,
+  };
+  chatStateByChatId.set(chatId, initial);
+  return initial;
+};
+
+const appendHistory = (
+  state: ChatState,
+  speaker: "user" | "assistant",
+  text: string,
+): void => {
+  state.history.push(`${speaker}: ${text}`);
+  if (state.history.length > 12) {
+    state.history = state.history.slice(-12);
+  }
+};
+
 const toSha256Hex = async (input: string): Promise<string> => {
   const encoded = new TextEncoder().encode(input);
   const digest = await crypto.subtle.digest("SHA-256", encoded);
@@ -76,8 +183,6 @@ const toSha256Hex = async (input: string): Promise<string> => {
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
 };
-
-const approvalActionType = "publish_pr" as const;
 
 const addHours = (iso: string, hours: number): string => {
   const value = new Date(iso).getTime() + hours * 60 * 60 * 1000;
@@ -106,99 +211,6 @@ const approvalPayloadHash = async (
   return toSha256Hex(canonical);
 };
 
-export const parseCommand = (text: string): Command => {
-  const trimmed = text.trim();
-  if (!trimmed.startsWith("/")) {
-    return { type: "delegate", text: trimmed };
-  }
-
-  const [command, rawArg] = trimmed.split(/\s+/, 2);
-  const arg = rawArg?.trim() || null;
-
-  switch (command.toLowerCase()) {
-    case "/approve":
-      return { type: "approve", approvalId: arg };
-    case "/deny":
-      return { type: "deny", approvalId: arg };
-    case "/status":
-      return { type: "status", workItemId: arg };
-    case "/explain":
-      return { type: "explain", workItemId: arg };
-    default:
-      return { type: "delegate", text: trimmed };
-  }
-};
-
-const summarize = (text: string): string => {
-  const collapsed = text.replace(/\s+/g, " ").trim();
-  if (collapsed.length <= 140) {
-    return collapsed;
-  }
-  return `${collapsed.slice(0, 137)}...`;
-};
-
-const formatPlanResponse = (
-  workItem: WorkItem,
-  plan: ExecutionPlan,
-  artifact: GeneratedFileArtifact,
-  approval: ApprovalRecord | null,
-): string => {
-  const lines = [
-    `Work item ${workItem.id}`,
-    `Intent: ${plan.intentSummary}`,
-    `Assumptions: ${plan.assumptions.join("; ")}`,
-    `Ambiguities: ${plan.ambiguities.join("; ")}`,
-    `Next: ${plan.proposedNextStep}`,
-    `Generated file: ${artifact.path}`,
-  ];
-
-  if (approval) {
-    lines.push(
-      `Approval required: /approve ${approval.id} (risk ${plan.riskLevel}; side effects ${plan.sideEffects.join(", ")}; expires ${approval.expiresAt}).`,
-    );
-    lines.push(`To deny: /deny ${approval.id}`);
-  }
-
-  lines.push(`Check progress: /status ${workItem.id}`);
-  return lines.join("\n");
-};
-
-const formatExplainResponse = (input: {
-  workItem: WorkItem;
-  plan: ExecutionPlan | null;
-  approval: ApprovalRecord | null;
-  artifact: GeneratedFileArtifact | null;
-}): string => {
-  const { workItem, plan, approval, artifact } = input;
-  const alternatives = plan?.ambiguities.length
-    ? plan.ambiguities.join("; ")
-    : "No unresolved alternatives recorded.";
-  const assumptions = plan?.assumptions.length
-    ? plan.assumptions.join("; ")
-    : "No assumptions recorded.";
-
-  const lines = [
-    `Work item ${workItem.id}`,
-    `Status: ${workItem.status}`,
-    `Why: ${plan?.intentSummary ?? workItem.summary}`,
-    `What I used: summary='${workItem.summary}'; assumptions=${assumptions}`,
-    `Alternatives: ${alternatives}`,
-    `Current step: ${plan?.proposedNextStep ?? "No plan recorded."}`,
-  ];
-
-  if (artifact) {
-    lines.push(`Artifact: ${artifact.path}`);
-  }
-
-  if (approval) {
-    lines.push(
-      `Approval: ${approval.status} (${approval.id}, expires ${approval.expiresAt})`,
-    );
-  }
-
-  return lines.join("\n");
-};
-
 const appendAuditEvent = async (
   auditPort: AuditPort,
   event: AuditEvent,
@@ -219,194 +231,29 @@ const sendMessage = async (
   });
 };
 
-const appendApprovalRejectedAudit = async (
+const loadPendingApproval = async (
   deps: WorkerDeps,
-  approval: ApprovalRecord,
-  reason: string,
-): Promise<void> => {
-  const traceId =
-    (await deps.workItemStore.getById(approval.workItemId))?.traceId ??
-    "unknown";
-  await appendAuditEvent(deps.auditPort, {
-    eventId: crypto.randomUUID(),
-    eventType: "approval.rejected",
-    workItemId: approval.workItemId,
-    actor: "system",
-    timestamp: nowIso(),
-    traceId,
-    payload: {
-      approvalId: approval.id,
-      reason,
-    },
-  });
-};
-
-const handleStatusCommand = async (
-  deps: WorkerDeps,
-  message: InboundMessage,
-  workItemId: string | null,
-): Promise<void> => {
-  if (!workItemId) {
-    await sendMessage(
-      deps.chatPort,
-      {
-        chatId: message.chatId,
-        text: "Usage: /status <workItemId>",
-      },
-      { command: "status" },
-    );
-    return;
+  state: ChatState,
+): Promise<ApprovalRecord | null> => {
+  if (!state.pendingApprovalId) {
+    return null;
   }
 
-  const workItem = await deps.workItemStore.getById(workItemId);
-  if (!workItem) {
-    await sendMessage(
-      deps.chatPort,
-      {
-        chatId: message.chatId,
-        text: `No work item found for id ${workItemId}.`,
-      },
-      { command: "status", workItemId },
-    );
-    return;
-  }
-
-  const plan = await deps.planStore.getPlanByWorkItemId(workItemId);
-  const approval =
-    await deps.approvalStore.getLatestApprovalByWorkItemId(workItemId);
-  const approvalText = approval
-    ? `; approval=${approval.status}${approval.status === "pending" ? `(${approval.id})` : ""}`
-    : "";
-
-  await sendMessage(
-    deps.chatPort,
-    {
-      chatId: message.chatId,
-      text: `Work item ${workItem.id}: status=${workItem.status}; plan=${plan ? "ready" : "pending"}${approvalText}`,
-    },
-    { command: "status", workItemId },
+  const approval = await deps.approvalStore.getApprovalById(
+    state.pendingApprovalId,
   );
+  if (!approval || approval.status !== "pending") {
+    state.pendingApprovalId = null;
+    return null;
+  }
+  return approval;
 };
 
-const handleExplainCommand = async (
+const publishApprovedAction = async (
   deps: WorkerDeps,
   message: InboundMessage,
-  workItemId: string | null,
-): Promise<void> => {
-  if (!workItemId) {
-    await sendMessage(
-      deps.chatPort,
-      {
-        chatId: message.chatId,
-        text: "Usage: /explain <workItemId>",
-      },
-      { command: "explain" },
-    );
-    return;
-  }
-
-  const workItem = await deps.workItemStore.getById(workItemId);
-  if (!workItem) {
-    await sendMessage(
-      deps.chatPort,
-      {
-        chatId: message.chatId,
-        text: `No work item found for id ${workItemId}.`,
-      },
-      { command: "explain", workItemId },
-    );
-    return;
-  }
-
-  const [plan, approval, artifact] = await Promise.all([
-    deps.planStore.getPlanByWorkItemId(workItemId),
-    deps.approvalStore.getLatestApprovalByWorkItemId(workItemId),
-    deps.artifactStore.getArtifactByWorkItemId(workItemId),
-  ]);
-
-  await sendMessage(
-    deps.chatPort,
-    {
-      chatId: message.chatId,
-      text: formatExplainResponse({
-        workItem,
-        plan,
-        approval,
-        artifact,
-      }),
-    },
-    { command: "explain", workItemId },
-  );
-};
-
-const resolvePlanByApproval = async (
-  deps: WorkerDeps,
   approval: ApprovalRecord,
-): Promise<ExecutionPlan | null> =>
-  deps.planStore.getPlanByWorkItemId(approval.workItemId);
-
-const resolveArtifactByApproval = async (
-  deps: WorkerDeps,
-  approval: ApprovalRecord,
-): Promise<GeneratedFileArtifact | null> =>
-  deps.artifactStore.getArtifactByWorkItemId(approval.workItemId);
-
-const handleApproveCommand = async (
-  deps: WorkerDeps,
-  message: InboundMessage,
-  approvalId: string | null,
 ): Promise<void> => {
-  if (!approvalId) {
-    await sendMessage(
-      deps.chatPort,
-      {
-        chatId: message.chatId,
-        text: "Usage: /approve <approvalId>",
-      },
-      { command: "approve" },
-    );
-    return;
-  }
-
-  const approval = await deps.approvalStore.getApprovalById(approvalId);
-  if (!approval) {
-    await sendMessage(
-      deps.chatPort,
-      {
-        chatId: message.chatId,
-        text: `Approval rejected: NOT_FOUND for ${approvalId}.`,
-      },
-      { command: "approve", approvalId, reason: "NOT_FOUND" },
-    );
-    return;
-  }
-
-  if (approval.status === "denied") {
-    await appendApprovalRejectedAudit(deps, approval, "ALREADY_DENIED");
-    await sendMessage(
-      deps.chatPort,
-      {
-        chatId: message.chatId,
-        text: `Approval rejected: ALREADY_DENIED for ${approvalId}.`,
-      },
-      { command: "approve", approvalId, reason: "ALREADY_DENIED" },
-    );
-    return;
-  }
-
-  if (approval.status !== "pending") {
-    await appendApprovalRejectedAudit(deps, approval, "REPLAYED");
-    await sendMessage(
-      deps.chatPort,
-      {
-        chatId: message.chatId,
-        text: `Approval rejected: REPLAYED for ${approvalId}.`,
-      },
-      { command: "approve", approvalId, reason: "REPLAYED" },
-    );
-    return;
-  }
-
   const now = nowIso();
   if (isExpired(approval.expiresAt, now)) {
     await deps.approvalStore.updateApprovalStatus(
@@ -419,44 +266,39 @@ const handleApproveCommand = async (
       deps.chatPort,
       {
         chatId: message.chatId,
-        text: `Approval rejected: EXPIRED for ${approvalId}.`,
+        text: "That proposal expired. Ask me to propose it again.",
       },
-      { command: "approve", approvalId, reason: "EXPIRED" },
+      { command: "approve", reason: "EXPIRED" },
     );
-    await appendApprovalRejectedAudit(deps, approval, "EXPIRED");
     return;
   }
 
-  const plan = await resolvePlanByApproval(deps, approval);
-  const artifact = await resolveArtifactByApproval(deps, approval);
+  const [plan, artifact] = await Promise.all([
+    deps.planStore.getPlanByWorkItemId(approval.workItemId),
+    deps.artifactStore.getArtifactByWorkItemId(approval.workItemId),
+  ]);
+
   if (!plan || !artifact) {
-    await appendApprovalRejectedAudit(deps, approval, "MISMATCH");
     await sendMessage(
       deps.chatPort,
       {
         chatId: message.chatId,
-        text: `Approval rejected: MISMATCH for ${approvalId}.`,
+        text: "Proposal state is missing. Ask me to re-propose this change.",
       },
-      { command: "approve", approvalId, reason: "MISMATCH" },
+      { command: "approve", reason: "MISMATCH" },
     );
     return;
   }
 
   const hash = await approvalPayloadHash(plan, artifact);
   if (hash !== approval.payloadHash) {
-    await appendApprovalRejectedAudit(deps, approval, "MISMATCH");
     await sendMessage(
       deps.chatPort,
       {
         chatId: message.chatId,
-        text: `Approval rejected: MISMATCH for ${approvalId}.`,
+        text: "Proposal changed and can no longer be approved. Ask me to re-propose.",
       },
-      {
-        command: "approve",
-        approvalId,
-        reason: "MISMATCH",
-        workItemId: approval.workItemId,
-      },
+      { command: "approve", reason: "MISMATCH" },
     );
     return;
   }
@@ -468,10 +310,10 @@ const handleApproveCommand = async (
     "APPROVED",
   );
   await deps.workItemStore.updateStatus(approval.workItemId, "approved", now);
+
   const traceId =
     (await deps.workItemStore.getById(approval.workItemId))?.traceId ??
     "unknown";
-
   await appendAuditEvent(deps.auditPort, {
     eventId: crypto.randomUUID(),
     eventType: "approval.granted",
@@ -482,20 +324,6 @@ const handleApproveCommand = async (
     payload: {
       approvalId: approval.id,
       actionType: approval.actionType,
-    },
-  });
-
-  await appendAuditEvent(deps.auditPort, {
-    eventId: crypto.randomUUID(),
-    eventType: "execution.started",
-    workItemId: approval.workItemId,
-    actor: "assistant",
-    timestamp: now,
-    traceId,
-    payload: {
-      approvalId: approval.id,
-      actionType: approval.actionType,
-      artifactPath: artifact.path,
     },
   });
 
@@ -516,20 +344,6 @@ const handleApproveCommand = async (
       payload: {
         branchName: published.branchName,
         pullRequestUrl: published.pullRequestUrl,
-        artifactPath: artifact.path,
-      },
-    });
-
-    await appendAuditEvent(deps.auditPort, {
-      eventId: crypto.randomUUID(),
-      eventType: "execution.completed",
-      workItemId: approval.workItemId,
-      actor: "assistant",
-      timestamp: nowIso(),
-      traceId,
-      payload: {
-        approvalId: approval.id,
-        actionType: approval.actionType,
       },
     });
 
@@ -537,189 +351,87 @@ const handleApproveCommand = async (
       deps.chatPort,
       {
         chatId: message.chatId,
-        text: `Approval accepted for work item ${approval.workItemId}. PR published: ${published.pullRequestUrl}`,
+        text: `Approved. PR published: ${published.pullRequestUrl}`,
       },
-      { command: "approve", approvalId, workItemId: approval.workItemId },
+      { command: "approve", workItemId: approval.workItemId },
     );
   } catch (error) {
-    const failureAt = nowIso();
     await deps.workItemStore.updateStatus(
       approval.workItemId,
       "cancelled",
-      failureAt,
+      nowIso(),
     );
-    await appendAuditEvent(deps.auditPort, {
-      eventId: crypto.randomUUID(),
-      eventType: "execution.failed",
-      workItemId: approval.workItemId,
-      actor: "system",
-      timestamp: failureAt,
-      traceId,
-      payload: {
-        approvalId: approval.id,
-        actionType: approval.actionType,
-        error: String(error),
-      },
-    });
-
     await sendMessage(
       deps.chatPort,
       {
         chatId: message.chatId,
-        text: `Approval accepted, but publish failed for work item ${approval.workItemId}: ${String(error)}`,
+        text: `Approval accepted, but publish failed: ${String(error)}`,
       },
-      {
-        command: "approve",
-        approvalId,
-        workItemId: approval.workItemId,
-        error: String(error),
-      },
+      { command: "approve", error: String(error) },
     );
   }
 };
 
-const handleDenyCommand = async (
+const persistExecutionProposal = async (
   deps: WorkerDeps,
-  message: InboundMessage,
-  approvalId: string | null,
-): Promise<void> => {
-  if (!approvalId) {
-    await sendMessage(
-      deps.chatPort,
-      {
-        chatId: message.chatId,
-        text: "Usage: /deny <approvalId>",
-      },
-      { command: "deny" },
-    );
-    return;
-  }
-
-  const approval = await deps.approvalStore.getApprovalById(approvalId);
-  if (!approval) {
-    await sendMessage(
-      deps.chatPort,
-      {
-        chatId: message.chatId,
-        text: `Denial rejected: NOT_FOUND for ${approvalId}.`,
-      },
-      { command: "deny", approvalId, reason: "NOT_FOUND" },
-    );
-    return;
-  }
-
-  if (approval.status !== "pending") {
-    await appendApprovalRejectedAudit(deps, approval, "REPLAYED");
-    await sendMessage(
-      deps.chatPort,
-      {
-        chatId: message.chatId,
-        text: `Denial rejected: REPLAYED for ${approvalId}.`,
-      },
-      { command: "deny", approvalId, reason: "REPLAYED" },
-    );
-    return;
-  }
-
-  const now = nowIso();
-  await deps.approvalStore.updateApprovalStatus(
-    approval.id,
-    "denied",
-    now,
-    "USER_DENIED",
-  );
-  await deps.workItemStore.updateStatus(approval.workItemId, "denied", now);
-  const traceId =
-    (await deps.workItemStore.getById(approval.workItemId))?.traceId ??
-    "unknown";
-
-  await appendAuditEvent(deps.auditPort, {
-    eventId: crypto.randomUUID(),
-    eventType: "approval.denied",
-    workItemId: approval.workItemId,
-    actor: "user",
-    timestamp: now,
-    traceId,
-    payload: {
-      approvalId: approval.id,
-      actionType: approval.actionType,
-    },
-  });
-
-  await sendMessage(
-    deps.chatPort,
-    {
-      chatId: message.chatId,
-      text: `Approval denied for work item ${approval.workItemId}. No external action will be executed.`,
-    },
-    { command: "deny", approvalId, workItemId: approval.workItemId },
-  );
-};
-
-export const handleChatMessage = async (
-  deps: WorkerDeps,
-  message: InboundMessage,
-): Promise<void> => {
-  logInfo("chat.message.received", {
-    chatId: message.chatId,
-    sourceMessageId: message.sourceMessageId ?? null,
-    chars: message.text.length,
-  });
-
-  const command = parseCommand(message.text);
-  logInfo("chat.command.parsed", {
-    chatId: message.chatId,
-    command: command.type,
-  });
-
-  if (command.type === "status") {
-    await handleStatusCommand(deps, message, command.workItemId);
-    return;
-  }
-
-  if (command.type === "approve") {
-    await handleApproveCommand(deps, message, command.approvalId);
-    return;
-  }
-
-  if (command.type === "deny") {
-    await handleDenyCommand(deps, message, command.approvalId);
-    return;
-  }
-
-  if (command.type === "explain") {
-    await handleExplainCommand(deps, message, command.workItemId);
-    return;
-  }
-
-  if (!command.text) {
-    await sendMessage(
-      deps.chatPort,
-      {
-        chatId: message.chatId,
-        text: "Please send a request with some detail.",
-      },
-      { command: "delegate", validation: "empty_text" },
-    );
-    return;
-  }
-
+  chatId: string,
+  requestText: string,
+  proposal: Extract<ModelTurnResponse, { mode: "execution_proposal" }>,
+  supersededApprovalId: string | null,
+): Promise<{ workItemId: string; approvalId: string }> => {
   const timestamp = nowIso();
   const workItem: WorkItem = {
     id: crypto.randomUUID(),
     traceId: crypto.randomUUID(),
     status: "delegated",
-    summary: summarize(command.text),
+    summary: requestText,
     createdAt: timestamp,
     updatedAt: timestamp,
   };
 
   await deps.workItemStore.create(workItem);
-  logInfo("work_item.created", {
+
+  const plan: ExecutionPlan = {
+    id: crypto.randomUUID(),
     workItemId: workItem.id,
-    traceId: workItem.traceId,
-    status: workItem.status,
-  });
+    createdAt: timestamp,
+    ...proposal.plan,
+  };
+
+  await deps.planStore.createPlan(plan);
+  await deps.artifactStore.saveArtifact(
+    workItem.id,
+    proposal.artifact,
+    timestamp,
+  );
+
+  if (supersededApprovalId) {
+    await deps.approvalStore.updateApprovalStatus(
+      supersededApprovalId,
+      "expired",
+      timestamp,
+      "SUPERSEDED_BY_REVISE",
+    );
+  }
+
+  const approval: ApprovalRecord = {
+    id: crypto.randomUUID(),
+    workItemId: workItem.id,
+    actionType: approvalActionType,
+    payloadHash: await approvalPayloadHash(plan, proposal.artifact),
+    status: "pending",
+    requestedAt: timestamp,
+    expiresAt: addHours(timestamp, 24),
+    consumedAt: null,
+    decisionReason: null,
+  };
+
+  await deps.approvalStore.createApproval(approval);
+  await deps.workItemStore.updateStatus(
+    workItem.id,
+    "approval_pending",
+    nowIso(),
+  );
 
   await appendAuditEvent(deps.auditPort, {
     eventId: crypto.randomUUID(),
@@ -730,218 +442,364 @@ export const handleChatMessage = async (
     traceId: workItem.traceId,
     payload: {
       source: "telegram",
-      text: command.text,
+      text: requestText,
+      chatId,
+    },
+  });
+
+  await appendAuditEvent(deps.auditPort, {
+    eventId: crypto.randomUUID(),
+    eventType: "approval.requested",
+    workItemId: workItem.id,
+    actor: "assistant",
+    timestamp: nowIso(),
+    traceId: workItem.traceId,
+    payload: {
+      approvalId: approval.id,
+      expiresAt: approval.expiresAt,
+    },
+  });
+
+  return { workItemId: workItem.id, approvalId: approval.id };
+};
+
+const publishPreview = (
+  workItemId: string,
+  plan: ExecutionPlanDraft,
+  artifact: GeneratedFileArtifact,
+): string => {
+  const branchName = `delegate/${workItemId}`;
+  const title = plan.intentSummary;
+  const body = [
+    `- Work item: ${workItemId}`,
+    `- Change: ${artifact.summary}`,
+  ].join("\n");
+
+  return [
+    "I can publish this as a PR.",
+    `Branch: ${branchName}`,
+    `Title: ${title}`,
+    "Body preview:",
+    body,
+    "Reply with: Approve / Revise / Deny",
+  ].join("\n");
+};
+
+const applyLocalArtifact = async (
+  repoPath: string,
+  artifact: GeneratedFileArtifact,
+): Promise<string> => {
+  const relativePath = artifact.path.trim();
+  if (
+    relativePath.length === 0 ||
+    relativePath.startsWith("/") ||
+    relativePath.includes("\\") ||
+    relativePath.split("/").some((segment) => segment === "..")
+  ) {
+    throw new Error("Artifact path must be repo-relative and safe");
+  }
+
+  const absolutePath = resolve(repoPath, relativePath);
+  await mkdir(dirname(absolutePath), { recursive: true });
+  await Bun.write(absolutePath, artifact.content);
+  return relativePath;
+};
+
+export const handleChatMessage = async (
+  deps: WorkerDeps,
+  message: InboundMessage,
+  options: WorkerOptions = {},
+): Promise<void> => {
+  const threshold = options.executionIntentConfidenceThreshold ?? 0.75;
+  const assistantRepoPath = options.assistantRepoPath ?? process.cwd();
+  const previewDiffFirst = options.previewDiffFirst ?? false;
+  const priorMessageCount = chatMessageCountByChatId.get(message.chatId) ?? 0;
+  chatMessageCountByChatId.set(message.chatId, priorMessageCount + 1);
+
+  logInfo("chat.message.received", {
+    chatId: message.chatId,
+    sourceMessageId: message.sourceMessageId ?? null,
+    chars: message.text.length,
+  });
+
+  const action = parseAction(message.text);
+  logInfo("chat.action.parsed", {
+    chatId: message.chatId,
+    action: action.type,
+  });
+
+  if (action.type === "start") {
+    if (priorMessageCount === 0) {
+      await sendMessage(
+        deps.chatPort,
+        {
+          chatId: message.chatId,
+          text: "Hi - I am ready. Tell me what you want to work on.",
+        },
+        { action: "start", firstMessage: true },
+      );
+    }
+    return;
+  }
+
+  const state = getChatState(message.chatId);
+  const pendingApproval = await loadPendingApproval(deps, state);
+  const pendingLocalAction =
+    pendingLocalActionByChatId.get(message.chatId) ?? null;
+
+  if (action.type === "approve") {
+    if (pendingLocalAction) {
+      try {
+        const writtenPath = await applyLocalArtifact(
+          assistantRepoPath,
+          pendingLocalAction.artifact,
+        );
+        pendingLocalActionByChatId.delete(message.chatId);
+        state.pendingApprovalId = null;
+        const text = `Done. Applied local change to ${writtenPath}.`;
+        await sendMessage(
+          deps.chatPort,
+          {
+            chatId: message.chatId,
+            text,
+          },
+          { action: "approve", mode: "local_apply" },
+        );
+        appendHistory(state, "user", message.text);
+        appendHistory(state, "assistant", text);
+      } catch (error) {
+        await sendMessage(
+          deps.chatPort,
+          {
+            chatId: message.chatId,
+            text: `I could not apply that local change: ${String(error)}`,
+          },
+          { action: "approve", mode: "local_apply_error" },
+        );
+      }
+      return;
+    }
+
+    if (!pendingApproval) {
+      await sendMessage(
+        deps.chatPort,
+        {
+          chatId: message.chatId,
+          text: "There is nothing pending to approve right now.",
+        },
+        { action: "approve", reason: "NONE" },
+      );
+      return;
+    }
+
+    await publishApprovedAction(deps, message, pendingApproval);
+    state.pendingApprovalId = null;
+    appendHistory(state, "user", message.text);
+    appendHistory(state, "assistant", "Approval accepted.");
+    return;
+  }
+
+  if (action.type === "deny") {
+    if (pendingLocalAction) {
+      pendingLocalActionByChatId.delete(message.chatId);
+      await sendMessage(
+        deps.chatPort,
+        {
+          chatId: message.chatId,
+          text: "Denied. I will not apply that local change.",
+        },
+        { action: "deny", mode: "local_apply" },
+      );
+      return;
+    }
+
+    if (!pendingApproval) {
+      await sendMessage(
+        deps.chatPort,
+        {
+          chatId: message.chatId,
+          text: "There is nothing pending to deny.",
+        },
+        { action: "deny", reason: "NONE" },
+      );
+      return;
+    }
+
+    const now = nowIso();
+    await deps.approvalStore.updateApprovalStatus(
+      pendingApproval.id,
+      "denied",
+      now,
+      "USER_DENIED",
+    );
+    await deps.workItemStore.updateStatus(
+      pendingApproval.workItemId,
+      "denied",
+      now,
+    );
+    state.pendingApprovalId = null;
+    await sendMessage(
+      deps.chatPort,
+      {
+        chatId: message.chatId,
+        text: "Denied. I will not execute that change.",
+      },
+      { action: "deny", workItemId: pendingApproval.workItemId },
+    );
+    appendHistory(state, "user", message.text);
+    appendHistory(state, "assistant", "Denied.");
+    return;
+  }
+
+  let modelInputText = action.type === "chat" ? action.text : action.text;
+  if (action.type === "revise" && (pendingApproval || pendingLocalAction)) {
+    const workItem = pendingApproval
+      ? await deps.workItemStore.getById(pendingApproval.workItemId)
+      : null;
+    modelInputText = [
+      `Revise the pending proposal for request: ${workItem?.summary ?? pendingLocalAction?.originalRequest ?? "unknown"}`,
+      `Revision: ${action.text}`,
+    ].join("\n");
+  }
+
+  appendHistory(state, "user", modelInputText);
+
+  let response: ModelTurnResponse;
+  try {
+    response = await deps.modelPort.respond({
       chatId: message.chatId,
-    },
-  });
-
-  let draft: ExecutionPlanDraft;
-  try {
-    draft = await deps.modelPort.plan({
-      workItemId: workItem.id,
-      text: command.text,
+      text: modelInputText,
+      context: [...state.history],
+      pendingProposalWorkItemId: pendingApproval?.workItemId ?? null,
     });
   } catch (error) {
-    const failureAt = nowIso();
-    await deps.workItemStore.updateStatus(workItem.id, "cancelled", failureAt);
-    await appendAuditEvent(deps.auditPort, {
-      eventId: crypto.randomUUID(),
-      eventType: "execution.failed",
-      workItemId: workItem.id,
-      actor: "system",
-      timestamp: failureAt,
-      traceId: workItem.traceId,
-      payload: {
-        stage: "plan",
-        error: String(error),
-      },
-    });
     await sendMessage(
       deps.chatPort,
       {
         chatId: message.chatId,
-        text: `Unable to plan work item ${workItem.id}: ${String(error)}`,
+        text: `I hit an error while thinking about that: ${String(error)}`,
       },
-      { command: "delegate", workItemId: workItem.id, stage: "plan_failed" },
+      { action: "chat", stage: "model_error" },
     );
     return;
   }
-  logInfo("plan.drafted", {
-    workItemId: workItem.id,
-    traceId: workItem.traceId,
-    riskLevel: draft.riskLevel,
-    requiresApproval: draft.requiresApproval,
-  });
 
-  const policy: PolicyDecision = await deps.policyEngine.evaluate(draft);
-  logInfo("policy.evaluated", {
-    workItemId: workItem.id,
-    traceId: workItem.traceId,
-    decision: policy.decision,
-    reasonCode: policy.reasonCode,
-  });
-
-  const plan: ExecutionPlan = {
-    id: crypto.randomUUID(),
-    workItemId: workItem.id,
-    createdAt: nowIso(),
-    ...draft,
-  };
-
-  let generated: GenerateResult;
-  try {
-    generated = await deps.modelPort.generate({
-      workItemId: workItem.id,
-      text: command.text,
-      plan: draft,
-    });
-  } catch (error) {
-    const failureAt = nowIso();
-    await deps.workItemStore.updateStatus(workItem.id, "cancelled", failureAt);
-    await appendAuditEvent(deps.auditPort, {
-      eventId: crypto.randomUUID(),
-      eventType: "execution.failed",
-      workItemId: workItem.id,
-      actor: "system",
-      timestamp: failureAt,
-      traceId: workItem.traceId,
-      payload: {
-        stage: "generate",
-        error: String(error),
-      },
-    });
+  if (response.mode === "chat_reply") {
     await sendMessage(
       deps.chatPort,
       {
         chatId: message.chatId,
-        text: `Unable to generate changes for work item ${workItem.id}: ${String(error)}`,
+        text: response.replyText,
       },
-      {
-        command: "delegate",
-        workItemId: workItem.id,
-        stage: "generate_failed",
-      },
+      { action: "chat", mode: "chat_reply" },
     );
+    appendHistory(state, "assistant", response.replyText);
     return;
   }
 
-  await deps.artifactStore.saveArtifact(
-    workItem.id,
-    generated.artifact,
-    nowIso(),
+  if (response.confidence < threshold) {
+    const text = `${response.replyText}\nCan you confirm if you want me to execute this as a concrete change?`;
+    await sendMessage(
+      deps.chatPort,
+      {
+        chatId: message.chatId,
+        text,
+      },
+      {
+        action: "chat",
+        mode: "low_confidence",
+        confidence: response.confidence,
+      },
+    );
+    appendHistory(state, "assistant", text);
+    return;
+  }
+
+  const publishIntent = isPublishIntent(message.text);
+  const destructiveIntent = isDestructiveIntent(message.text);
+
+  if (publishIntent) {
+    const persisted = await persistExecutionProposal(
+      deps,
+      message.chatId,
+      message.text,
+      response,
+      pendingApproval?.id ?? null,
+    );
+
+    state.pendingApprovalId = persisted.approvalId;
+    pendingLocalActionByChatId.delete(message.chatId);
+
+    const outbound = `${response.replyText}\n${publishPreview(
+      persisted.workItemId,
+      response.plan,
+      response.artifact,
+    )}`;
+    await sendMessage(
+      deps.chatPort,
+      {
+        chatId: message.chatId,
+        text: outbound,
+      },
+      {
+        action: action.type,
+        mode: "execution_proposal",
+        confidence: response.confidence,
+        workItemId: persisted.workItemId,
+        approvalId: persisted.approvalId,
+      },
+    );
+    appendHistory(state, "assistant", response.replyText);
+    return;
+  }
+
+  if (destructiveIntent || previewDiffFirst) {
+    pendingLocalActionByChatId.set(message.chatId, {
+      artifact: response.artifact,
+      originalRequest: message.text,
+    });
+    state.pendingApprovalId = null;
+
+    await sendMessage(
+      deps.chatPort,
+      {
+        chatId: message.chatId,
+        text: [
+          response.replyText,
+          `Proposed local change: ${response.artifact.path}`,
+          "Reply with: Approve / Revise / Deny",
+        ].join("\n"),
+      },
+      {
+        action: action.type,
+        mode: "local_preview",
+        confidence: response.confidence,
+      },
+    );
+    appendHistory(state, "assistant", response.replyText);
+    return;
+  }
+
+  const writtenPath = await applyLocalArtifact(
+    assistantRepoPath,
+    response.artifact,
   );
-  await appendAuditEvent(deps.auditPort, {
-    eventId: crypto.randomUUID(),
-    eventType: "artifact.generated",
-    workItemId: workItem.id,
-    actor: "assistant",
-    timestamp: nowIso(),
-    traceId: workItem.traceId,
-    payload: {
-      path: generated.artifact.path,
-      summary: generated.artifact.summary,
-    },
-  });
-
-  await deps.planStore.createPlan(plan);
-  logInfo("plan.persisted", {
-    workItemId: workItem.id,
-    traceId: workItem.traceId,
-    planId: plan.id,
-  });
-
-  let nextStatus: WorkItem["status"] = "triaged";
-  let approvalRecord: ApprovalRecord | null = null;
-
-  if (policy.decision === "requires_approval") {
-    const requestedAt = nowIso();
-    approvalRecord = {
-      id: crypto.randomUUID(),
-      workItemId: workItem.id,
-      actionType: approvalActionType,
-      payloadHash: await approvalPayloadHash(plan, generated.artifact),
-      status: "pending",
-      requestedAt,
-      expiresAt: addHours(requestedAt, 24),
-      consumedAt: null,
-      decisionReason: null,
-    };
-    await deps.approvalStore.createApproval(approvalRecord);
-    nextStatus = "approval_pending";
-    await appendAuditEvent(deps.auditPort, {
-      eventId: crypto.randomUUID(),
-      eventType: "approval.requested",
-      workItemId: workItem.id,
-      actor: "assistant",
-      timestamp: nowIso(),
-      traceId: workItem.traceId,
-      payload: {
-        approvalId: approvalRecord.id,
-        actionType: approvalRecord.actionType,
-        expiresAt: approvalRecord.expiresAt,
-        reasonCode: policy.reasonCode,
-      },
-    });
-    logInfo("approval.requested", {
-      workItemId: workItem.id,
-      traceId: workItem.traceId,
-      approvalId: approvalRecord.id,
-      expiresAt: approvalRecord.expiresAt,
-    });
-  }
-
-  await deps.workItemStore.updateStatus(workItem.id, nextStatus, nowIso());
-  logInfo("work_item.status_updated", {
-    workItemId: workItem.id,
-    traceId: workItem.traceId,
-    status: nextStatus,
-  });
-
-  await appendAuditEvent(deps.auditPort, {
-    eventId: crypto.randomUUID(),
-    eventType: "plan.created",
-    workItemId: workItem.id,
-    actor: "assistant",
-    timestamp: nowIso(),
-    traceId: workItem.traceId,
-    payload: {
-      planId: plan.id,
-      riskLevel: plan.riskLevel,
-      requiresApproval: policy.decision === "requires_approval",
-    },
-  });
-
-  await appendAuditEvent(deps.auditPort, {
-    eventId: crypto.randomUUID(),
-    eventType: "work_item.triaged",
-    workItemId: workItem.id,
-    actor: "assistant",
-    timestamp: nowIso(),
-    traceId: workItem.traceId,
-    payload: {
-      status: "triaged",
-      planId: plan.id,
-    },
-  });
-
+  state.pendingApprovalId = null;
+  pendingLocalActionByChatId.delete(message.chatId);
+  const outbound = `${response.replyText}\nDone. Applied local change to ${writtenPath}.`;
   await sendMessage(
     deps.chatPort,
     {
       chatId: message.chatId,
-      text: formatPlanResponse(
-        { ...workItem, status: nextStatus, updatedAt: nowIso() },
-        plan,
-        generated.artifact,
-        approvalRecord,
-      ),
+      text: outbound,
     },
     {
-      workItemId: workItem.id,
-      traceId: workItem.traceId,
-      approvalId: approvalRecord?.id ?? null,
-      command: "delegate",
+      action: action.type,
+      mode: "local_applied",
+      confidence: response.confidence,
     },
   );
+  appendHistory(state, "assistant", response.replyText);
 };
 
 export const recoverInFlightWorkItems = async (
@@ -994,6 +852,7 @@ export const recoverInFlightWorkItems = async (
 export const startTelegramWorker = (
   deps: WorkerDeps,
   pollIntervalMs: number,
+  options: WorkerOptions = {},
 ): Promise<never> => {
   let cursor: number | null = null;
 
@@ -1009,7 +868,7 @@ export const startTelegramWorker = (
         }
         for (const update of updates) {
           cursor = update.updateId + 1;
-          await handleChatMessage(deps, update.message);
+          await handleChatMessage(deps, update.message, options);
         }
       } catch (error) {
         logError("worker.cycle.failed", {

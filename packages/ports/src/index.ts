@@ -8,6 +8,7 @@ import type {
   GenerateInput,
   GenerateResult,
   InboundMessage,
+  ModelTurnResponse,
   OutboundMessage,
   PolicyDecision,
   PublishPrInput,
@@ -69,9 +70,17 @@ export type PlanInput = {
   text: string;
 };
 
+export type RespondInput = {
+  chatId: string;
+  text: string;
+  context: string[];
+  pendingProposalWorkItemId: string | null;
+};
+
 export interface ModelPort {
-  plan(input: PlanInput): Promise<ExecutionPlanDraft>;
-  generate(input: GenerateInput): Promise<GenerateResult>;
+  respond(input: RespondInput): Promise<ModelTurnResponse>;
+  plan?(input: PlanInput): Promise<ExecutionPlanDraft>;
+  generate?(input: GenerateInput): Promise<GenerateResult>;
 }
 
 export interface ArtifactStore {

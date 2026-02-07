@@ -76,18 +76,30 @@ const boot = Effect.gen(function* () {
         vcsPort,
       },
       config.telegramPollIntervalMs,
+      {
+        executionIntentConfidenceThreshold:
+          config.executionIntentConfidenceThreshold,
+        assistantRepoPath: config.assistantRepoPath,
+        previewDiffFirst: config.previewDiffFirst,
+      },
     );
   } else {
     console.log("telegram worker disabled: TELEGRAM_BOT_TOKEN is not set");
   }
 
   return {
+    configSourcePath: config.configSourcePath,
+    envOverridesApplied: config.envOverridesApplied,
     port: config.port,
     sqlitePath: config.sqlitePath,
     auditLogPath: config.auditLogPath,
     internalRoutesEnabled: config.enableInternalRoutes,
     telegramWorkerEnabled: config.telegramBotToken !== null,
+    telegramTokenConfigured: config.telegramBotToken !== null,
     modelProvider: config.modelProvider,
+    executionIntentConfidenceThreshold:
+      config.executionIntentConfidenceThreshold,
+    previewDiffFirst: config.previewDiffFirst,
     assistantRepoPath: config.assistantRepoPath,
     recovery,
   };

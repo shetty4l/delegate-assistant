@@ -48,6 +48,20 @@ export type GenerateResult = {
   artifact: GeneratedFileArtifact;
 };
 
+export type ModelTurnResponse =
+  | {
+      mode: "chat_reply";
+      replyText: string;
+      confidence: number;
+    }
+  | {
+      mode: "execution_proposal";
+      replyText: string;
+      confidence: number;
+      plan: ExecutionPlanDraft;
+      artifact: GeneratedFileArtifact;
+    };
+
 export type ExecutionPlan = {
   id: string;
   workItemId: string;

@@ -109,6 +109,7 @@ This document defines what the system must do, not how it is implemented.
 ### 6.2 Constraints
 - The assistant must not silently modify its own safety, approval, or identity constraints.
 - Changes to core guardrails require explicit, high-signal approval.
+- In early phases, applying assistant self-update code to the running assistant remains operator-managed (manual apply), even when assistant-generated PRs are merged.
 
 ## 7. Credentials and Secrets
 
