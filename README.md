@@ -1,6 +1,11 @@
 # Delegate Assistant
 
-Delegate Assistant is an approval-gated personal operator that can draft and execute delegated work while keeping strict auditability and identity separation.
+Delegate Assistant is a lightweight Telegram-to-OpenCode bridge.
+
+The runtime is intentionally thin:
+- Telegram is the chat interface.
+- OpenCode handles execution behavior and safety controls.
+- This wrapper handles message relay, topic-aware session continuity, and basic service health.
 
 ## Current Status
 
@@ -11,4 +16,29 @@ Design docs are in `docs/`:
 - `docs/30-39_execution/30-v0-working-plan.md`
 - `docs/30-39_execution/31-v0-implementation-blueprint.md`
 
-Implementation begins from these docs.
+Current runtime entrypoints:
+- `apps/assistant-core/src/main.ts`
+- `apps/assistant-core/src/worker.ts`
+- `apps/assistant-core/src/session-store.ts`
+- `packages/adapters-telegram/src/index.ts`
+- `packages/adapters-model-opencode-cli/src/index.ts`
+
+## Manage macOS user service (launchd)
+
+Use these commands to manage the local `bun run dev` LaunchAgent on macOS.
+
+Service file:
+- `~/Library/LaunchAgents/com.suyash.delegate-assistant.dev.plist`
+
+Commands:
+- Load/start: `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.suyash.delegate-assistant.dev.plist`
+- Enable at login: `launchctl enable gui/$(id -u)/com.suyash.delegate-assistant.dev`
+- Restart now: `launchctl kickstart -k gui/$(id -u)/com.suyash.delegate-assistant.dev`
+- Stop/unload: `launchctl bootout gui/$(id -u)/com.suyash.delegate-assistant.dev`
+- Status: `launchctl print gui/$(id -u)/com.suyash.delegate-assistant.dev`
+- Tail stderr log: `tail -f ~/Library/Logs/delegate-assistant.stderr.log`
+- Tail stdout log: `tail -f ~/Library/Logs/delegate-assistant.stdout.log`
+
+Power settings (Mac mini server baseline):
+- Apply: `sudo pmset -c sleep 0 standby 0 autorestart 1 powernap 0`
+- Verify: `pmset -g`

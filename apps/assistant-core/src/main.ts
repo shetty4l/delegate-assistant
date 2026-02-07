@@ -4,7 +4,10 @@ import { TelegramLongPollingAdapter } from "@delegate/adapters-telegram";
 
 import { loadConfig } from "./config";
 import { startHttpServer } from "./http";
-import { ensureOpencodeServer } from "./opencode-server";
+import {
+  ensureOpencodeServer,
+  probeOpencodeReachability,
+} from "./opencode-server";
 import { SqliteSessionStore } from "./session-store";
 import { startTelegramWorker } from "./worker";
 
@@ -36,12 +39,8 @@ const boot = async () => {
         host: config.opencodeServeHost,
         port: config.opencodeServePort,
         workingDirectory: config.assistantRepoPath,
-        modelPing: async () => {
-          if (!modelPort.ping) {
-            return;
-          }
-          await modelPort.ping();
-        },
+        transportPing: async () =>
+          probeOpencodeReachability(config.opencodeAttachUrl),
       });
     } catch (cause) {
       throw new Error(`Failed to ensure opencode server: ${String(cause)}`);
