@@ -9,6 +9,7 @@ type TelegramGetUpdatesResponse = {
       message_id: number;
       date: number;
       text?: string;
+      message_thread_id?: number;
       chat: {
         id: number;
       };
@@ -74,6 +75,9 @@ export class TelegramLongPollingAdapter implements ChatPort {
       body: JSON.stringify({
         chat_id: message.chatId,
         text: message.text,
+        ...(message.threadId
+          ? { message_thread_id: Number(message.threadId) }
+          : {}),
       }),
     });
 
@@ -94,6 +98,7 @@ export class TelegramLongPollingAdapter implements ChatPort {
           message_id: number;
           date: number;
           text?: string;
+          message_thread_id?: number;
           chat: {
             id: number;
           };
@@ -106,6 +111,10 @@ export class TelegramLongPollingAdapter implements ChatPort {
 
     return {
       chatId: String(rawMessage.chat.id),
+      threadId:
+        typeof rawMessage.message_thread_id === "number"
+          ? String(rawMessage.message_thread_id)
+          : null,
       text: rawMessage.text.trim(),
       receivedAt: new Date(rawMessage.date * 1000).toISOString(),
       sourceMessageId: `${updateId}:${rawMessage.message_id}`,

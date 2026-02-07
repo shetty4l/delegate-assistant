@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -6,41 +6,42 @@ export type AppConfig = {
   configSourcePath: string;
   envOverridesApplied: number;
   port: number;
-  nodeEnv: string;
-  enableInternalRoutes: boolean;
   sqlitePath: string;
-  auditLogPath: string;
   telegramBotToken: string | null;
   telegramPollIntervalMs: number;
   modelProvider: "stub" | "opencode_cli";
   opencodeBin: string;
   modelName: string;
   assistantRepoPath: string;
-  githubBaseBranch: string | null;
-  executionIntentConfidenceThreshold: number;
-  previewDiffFirst: boolean;
+  opencodeAttachUrl: string;
+  opencodeAutoStart: boolean;
+  opencodeServeHost: string;
+  opencodeServePort: number;
+  sessionIdleTimeoutMs: number;
+  sessionMaxConcurrent: number;
+  sessionRetryAttempts: number;
 };
 
 type RawConfigFile = {
   port?: number;
-  nodeEnv?: string;
-  enableInternalRoutes?: boolean;
   sqlitePath?: string;
-  auditLogPath?: string;
   telegramBotToken?: string | null;
   telegramPollIntervalMs?: number;
   modelProvider?: "stub" | "opencode_cli";
   opencodeBin?: string;
   modelName?: string;
   assistantRepoPath?: string;
-  githubBaseBranch?: string | null;
-  executionIntentConfidenceThreshold?: number;
-  previewDiffFirst?: boolean;
+  opencodeAttachUrl?: string;
+  opencodeAutoStart?: boolean;
+  opencodeServeHost?: string;
+  opencodeServePort?: number;
+  sessionIdleTimeoutMs?: number;
+  sessionMaxConcurrent?: number;
+  sessionRetryAttempts?: number;
 };
 
 const defaultConfigPath = "~/.config/delegate-assistant/config.json";
 const defaultSqlitePath = "~/.local/share/delegate-assistant/data/assistant.db";
-const defaultAuditPath = "~/.local/share/delegate-assistant/audit/events.jsonl";
 
 const expandHome = (inputPath: string): string => {
   if (inputPath === "~") {
@@ -126,15 +127,6 @@ const asPositiveInt = (value: number, name: string): number => {
   return value;
 };
 
-const asConfidence = (value: number): number => {
-  if (!Number.isFinite(value) || value < 0 || value > 1) {
-    throw new Error(
-      "EXECUTION_INTENT_CONFIDENCE_THRESHOLD must be between 0 and 1",
-    );
-  }
-  return value;
-};
-
 export const loadConfig = (): AppConfig => {
   const configSourcePath = expandHome(
     process.env.DELEGATE_CONFIG_PATH?.trim() || defaultConfigPath,
@@ -143,52 +135,65 @@ export const loadConfig = (): AppConfig => {
 
   const overriddenKeys = [
     "PORT",
-    "NODE_ENV",
-    "ENABLE_INTERNAL_ROUTES",
     "SQLITE_PATH",
-    "AUDIT_LOG_PATH",
     "TELEGRAM_BOT_TOKEN",
     "TELEGRAM_POLL_INTERVAL_MS",
     "MODEL_PROVIDER",
     "OPENCODE_BIN",
     "MODEL_NAME",
     "ASSISTANT_REPO_PATH",
-    "GITHUB_BASE_BRANCH",
-    "EXECUTION_INTENT_CONFIDENCE_THRESHOLD",
-    "PREVIEW_DIFF_FIRST",
+    "OPENCODE_ATTACH_URL",
+    "OPENCODE_AUTO_START",
+    "OPENCODE_SERVE_HOST",
+    "OPENCODE_SERVE_PORT",
+    "SESSION_IDLE_TIMEOUT_MS",
+    "SESSION_MAX_CONCURRENT",
+    "SESSION_RETRY_ATTEMPTS",
   ].filter((key) => process.env[key] !== undefined).length;
 
   const port = Number(
     process.env.PORT ?? asOptionalNumber(fileConfig.port) ?? "3000",
   );
-  const nodeEnv =
-    process.env.NODE_ENV ??
-    asOptionalString(fileConfig.nodeEnv) ??
-    "development";
   const telegramPollIntervalMs = Number(
     process.env.TELEGRAM_POLL_INTERVAL_MS ??
       asOptionalNumber(fileConfig.telegramPollIntervalMs) ??
       "2000",
   );
-  const enableInternalRoutes =
-    (process.env.ENABLE_INTERNAL_ROUTES?.trim() === "true" ||
-      asOptionalBoolean(fileConfig.enableInternalRoutes)) ??
-    nodeEnv === "development";
-
   const modelProvider = asModelProvider(
     process.env.MODEL_PROVIDER ?? fileConfig.modelProvider ?? "stub",
   );
-  const executionIntentConfidenceThreshold = asConfidence(
-    Number(
-      process.env.EXECUTION_INTENT_CONFIDENCE_THRESHOLD ??
-        asOptionalNumber(fileConfig.executionIntentConfidenceThreshold) ??
-        "0.75",
-    ),
+  const opencodeAttachUrl =
+    process.env.OPENCODE_ATTACH_URL?.trim() ||
+    asOptionalString(fileConfig.opencodeAttachUrl) ||
+    "http://127.0.0.1:4096";
+  const opencodeAutoStart =
+    process.env.OPENCODE_AUTO_START?.trim() === "true" ||
+    asOptionalBoolean(fileConfig.opencodeAutoStart) ||
+    true;
+  const opencodeServeHost =
+    process.env.OPENCODE_SERVE_HOST?.trim() ||
+    asOptionalString(fileConfig.opencodeServeHost) ||
+    "127.0.0.1";
+  const opencodeServePort = Number(
+    process.env.OPENCODE_SERVE_PORT ??
+      asOptionalNumber(fileConfig.opencodeServePort) ??
+      "4096",
   );
-  const previewDiffFirst =
-    process.env.PREVIEW_DIFF_FIRST?.trim() === "true" ||
-    asOptionalBoolean(fileConfig.previewDiffFirst) ||
-    false;
+  const sessionIdleTimeoutMs = Number(
+    process.env.SESSION_IDLE_TIMEOUT_MS ??
+      asOptionalNumber(fileConfig.sessionIdleTimeoutMs) ??
+      `${45 * 60 * 1000}`,
+  );
+  const sessionMaxConcurrent = Number(
+    process.env.SESSION_MAX_CONCURRENT ??
+      asOptionalNumber(fileConfig.sessionMaxConcurrent) ??
+      "5",
+  );
+  const sessionRetryAttempts = Number(
+    process.env.SESSION_RETRY_ATTEMPTS ??
+      asOptionalNumber(fileConfig.sessionRetryAttempts) ??
+      "1",
+  );
 
   const telegramBotToken =
     process.env.TELEGRAM_BOT_TOKEN?.trim() ||
@@ -198,11 +203,6 @@ export const loadConfig = (): AppConfig => {
     process.env.SQLITE_PATH ??
       asOptionalString(fileConfig.sqlitePath) ??
       defaultSqlitePath,
-  );
-  const auditLogPath = expandHome(
-    process.env.AUDIT_LOG_PATH ??
-      asOptionalString(fileConfig.auditLogPath) ??
-      defaultAuditPath,
   );
   const opencodeBin =
     process.env.OPENCODE_BIN?.trim() ||
@@ -217,30 +217,34 @@ export const loadConfig = (): AppConfig => {
       asOptionalString(fileConfig.assistantRepoPath) ||
       process.cwd(),
   );
-  const githubBaseBranch =
-    process.env.GITHUB_BASE_BRANCH?.trim() ||
-    asOptionalNullableString(fileConfig.githubBaseBranch) ||
-    null;
 
+  if (!existsSync(assistantRepoPath)) {
+    throw new Error(`ASSISTANT_REPO_PATH does not exist: ${assistantRepoPath}`);
+  }
   asPositiveInt(port, "PORT");
   asPositiveInt(telegramPollIntervalMs, "TELEGRAM_POLL_INTERVAL_MS");
+  asPositiveInt(opencodeServePort, "OPENCODE_SERVE_PORT");
+  asPositiveInt(sessionIdleTimeoutMs, "SESSION_IDLE_TIMEOUT_MS");
+  asPositiveInt(sessionMaxConcurrent, "SESSION_MAX_CONCURRENT");
+  asPositiveInt(sessionRetryAttempts, "SESSION_RETRY_ATTEMPTS");
 
   return {
     configSourcePath,
     envOverridesApplied: overriddenKeys,
     port,
-    nodeEnv,
-    enableInternalRoutes,
     sqlitePath,
-    auditLogPath,
     telegramBotToken,
     telegramPollIntervalMs,
     modelProvider,
     opencodeBin,
     modelName,
     assistantRepoPath,
-    githubBaseBranch,
-    executionIntentConfidenceThreshold,
-    previewDiffFirst,
+    opencodeAttachUrl,
+    opencodeAutoStart,
+    opencodeServeHost,
+    opencodeServePort,
+    sessionIdleTimeoutMs,
+    sessionMaxConcurrent,
+    sessionRetryAttempts,
   };
 };

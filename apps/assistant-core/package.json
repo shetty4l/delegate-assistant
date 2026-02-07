@@ -9,15 +9,10 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@delegate/adapters-github": "workspace:*",
     "@delegate/adapters-model-opencode-cli": "workspace:*",
     "@delegate/adapters-model-stub": "workspace:*",
-    "@delegate/adapters-sqlite": "workspace:*",
     "@delegate/adapters-telegram": "workspace:*",
-    "@delegate/audit": "workspace:*",
     "@delegate/domain": "workspace:*",
-    "@delegate/policy": "workspace:*",
-    "@delegate/ports": "workspace:*",
-    "effect": "^3.17.14"
+    "@delegate/ports": "workspace:*"
   }
 }

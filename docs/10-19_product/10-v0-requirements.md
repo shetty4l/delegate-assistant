@@ -3,7 +3,7 @@
 Status: active
 
 ## 1. Purpose
-Build a personal AI assistant that acts as a delegated operator, not an autonomous actor. The assistant helps with communication, execution, and project momentum while remaining explicitly approval-gated, auditable, and evolvable.
+Build a personal AI assistant that acts as a delegated operator, not an autonomous actor. Telegram is the user interface and OpenCode is the execution engine. The wrapper runtime should stay minimal while preserving auditability, continuity, and evolvability.
 
 This document defines what the system must do, not how it is implemented.
 
@@ -18,6 +18,7 @@ This document defines what the system must do, not how it is implemented.
 ### 2.2 Approval-Gated Action
 - No irreversible or externally visible side effects occur without explicit user approval.
 - The assistant may draft, plan, stage, and propose actions freely.
+- Safety and approval behavior are owned primarily by OpenCode in the active runtime.
 
 ### 2.3 Clear Separation of Identity
 - The assistant has its own identity across services.
@@ -38,8 +39,8 @@ This document defines what the system must do, not how it is implemented.
 
 ### 2.6 Language-First Interaction
 - The assistant should default to natural language, not command-heavy UX.
-- Slash commands are fallback controls, not the primary interaction model.
-- Approval confirmations must stay explicit and context-bound.
+- Telegram `/start` is the only wrapper-level command in v0.
+- All other interactions should be plain conversational turns.
 
 ### 2.7 Adaptive Chief-of-Staff Behavior
 - The assistant should evolve its collaboration style over time based on high-confidence observed preferences.
@@ -143,7 +144,7 @@ This document defines what the system must do, not how it is implemented.
 ### 9.1 Must Have
 - Telegram interaction
 - Assistant identity (email + GitHub accounts exist)
-- Delegation + approval model
+- Delegation + safety model
 - Audit logging
 - Support for self-building workflows
 
@@ -166,6 +167,6 @@ These decisions are intentionally deferred and should not block v0 progress.
 ## 11. Success Criteria
 The v0 assistant is considered successful if:
 - The user can delegate work via Telegram.
-- The assistant produces useful drafts and plans.
+- The assistant produces useful drafts and plans with low-friction conversational UX.
 - No side effects occur without approval.
 - The assistant can be tasked with improving itself and produce reviewable changes.

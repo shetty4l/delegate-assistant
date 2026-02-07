@@ -1,311 +1,117 @@
-# Personal Assistant v0 Implementation Blueprint
+# 31-v0-implementation-blueprint.md
 
 Status: active
 
-This document defines the concrete build plan, package layout, and implementation contracts for v0.
+This blueprint defines the current lightweight runtime: Telegram as transport, OpenCode as the execution and safety engine.
 
-## Implementation Notes (Current)
+## 1. Runtime Shape
 
-- M1 is implemented as a lean tracer bullet first.
-- HTTP in M1 uses Bun's native server (`Bun.serve`) with Effect orchestration, while preserving ports/adapters boundaries.
-- M1 persistence uses startup schema initialization for core tables (`work_items`, `audit_events`) before introducing a full migration runner.
-- Quality gates are centralized under `bun run verify` and enforced in CI.
-- M2 is implemented with real Telegram long polling and a deterministic `ModelPort.plan` stub; real OpenAI integration is deferred.
-- M2 command behavior: `/status` is active, while `/approve` and `/deny` are explicit placeholders until M3 approval integrity is wired.
-- M3 implements policy decisions plus approval integrity checks (one-time consumption, expiry, payload-hash validation) with auditable approval events.
-- M3 adds structured JSON lifecycle logs to stdout for live operator visibility with correlation IDs.
-- M4 is implemented with `ModelPort.plan` + `ModelPort.generate`, generated artifact persistence, approval hash binding, and local GitHub publish (`git` + `gh`) behind approval.
-- Next milestones split into M5 (explain/recovery/test matrix), M6 (conversation-first UX bootstrap), and M7 (adaptive memory via Engram).
+- Telegram receives user messages.
+- Assistant runtime maps each message to a session key.
+- Runtime relays text to OpenCode (`run --attach`, with `--session` when known).
+- OpenCode response is relayed back to the same Telegram chat/topic.
 
-## 1. Monorepo Layout
+No wrapper-side planning, approval workflow, or PR orchestration is in the hot path.
 
-```text
-.
-├── apps/
-│   └── assistant-core/
-│       ├── src/
-│       │   ├── api/
-│       │   ├── orchestrator/
-│       │   ├── workers/
-│       │   └── main.ts
-│       └── package.json
-├── packages/
-│   ├── domain/
-│   ├── ports/
-│   ├── policy/
-│   ├── audit/
-│   ├── adapters-telegram/
-│   ├── adapters-github/
-│   ├── adapters-model-opencode-cli/
-│   ├── adapters-sqlite/
-│   ├── adapters-memory-engram/
-│   └── adapters-secrets-env/
-├── docs/
-└── bun-workspace.toml
-```
+## 2. Session Continuity Contract
 
-## 2. Day 1-3 Build Plan
+Session key:
+- `sessionKey = chatId + ":" + (threadId || "root")`
 
-### Day 1: Foundation
-- Initialize workspace (`bun`, `tsconfig`, lint/test baseline).
-- Add EffectTS core dependencies.
-- Implement domain schemas and state machine transitions.
-- Add SQLite schema + migration runner.
-- Add append-only audit writer.
-- Expose `GET /health` and `GET /ready`.
+Persistence:
+- Store `sessionKey -> opencodeSessionId`
+- Store `lastUsedAt`
+- Store status (`active|stale`)
+- Persist Telegram polling cursor
 
-Deliverable:
-- App boots with wired layers and can persist a synthetic `WorkItem` + `AuditEvent`.
+Behavior:
+- On message: try persisted/memory session id first
+- If session fails: mark stale, retry once without session id
+- Persist returned `sessionID` from OpenCode JSON events
 
-### Day 2: Telegram + Planning Flow
-- Implement `ChatPort` Telegram adapter with long polling.
-- Parse inbound messages into delegated requests.
-- Call `ModelPort.plan` and persist `ExecutionPlan`.
-- Return concise response with next-step proposal.
-- Add approval prompt rendering (explicit command syntax).
+Defaults:
+- idle timeout: 45m
+- max concurrent in-memory session hints: 5
+- retry attempts on failed resumed session: 1
 
-Deliverable:
-- User can send Telegram request and receive a structured plan + approval prompt.
+## 3. OpenCode Server Lifecycle
 
-### Day 3: PR Publish Flow
-- Implement GitHub adapter (local `git` + `gh` CLI flow).
-- Implement approval token creation/consumption.
-- Wire `publishPr` execution path behind approval gate.
-- Post PR URL back to Telegram.
-- Add initial end-to-end test for `delegate -> approve -> PR URL` flow.
+- Runtime uses a fixed attach URL (`opencodeAttachUrl`)
+- If provider is `opencode_cli` and `opencodeAutoStart=true`, runtime ensures server:
+  - probe with `modelPort.ping()`
+  - if unavailable, spawn `opencode serve --hostname <host> --port <port>`
+  - wait until probe succeeds or timeout
 
-Deliverable:
-- Approved coding request opens a GitHub PR under assistant identity.
+This mirrors the local auto-start pattern used for supporting services.
 
-## 3. Domain Schemas (Effect Schema)
+## 4. Telegram Behavior
 
-Use `@effect/schema` for runtime validation + static type inference.
+Inbound:
+- `/start` is handled only for the first message in a chat.
+- Later `/start` messages are ignored.
+- All other text is relayed to OpenCode.
 
-Core schema set:
-- `WorkItem`
-- `WorkItemStatus`
-- `RiskLevel`
-- `ProposedAction`
-- `PolicyDecision`
-- `ApprovalRequest`
-- `ApprovalDecision`
-- `AuditEvent`
+Topics:
+- `message_thread_id` is captured as `threadId`.
+- Replies include `message_thread_id` so responses stay in the same topic.
 
-State transition guard:
-- Implement `transition(workItem, nextState)` returning typed error on invalid transitions.
+## 5. HTTP Ops Surface
 
-## 4. Event Taxonomy (Audit)
+`GET /health`
+- process alive only
 
-Required event types:
-- `work_item.delegated`
-- `work_item.triaged`
-- `plan.created`
-- `artifact.generated`
-- `approval.requested`
-- `approval.granted`
-- `approval.denied`
-- `approval.rejected`
-- `execution.started`
-- `execution.completed`
-- `execution.failed`
-- `vcs.pr_published`
+`GET /ready`
+- session store reachable
+- OpenCode reachable (`modelPort.ping`)
 
-Event envelope fields:
-- `eventId`
-- `eventType`
-- `workItemId`
-- `actor` (`user|assistant|system`)
-- `timestamp`
-- `traceId`
-- `payload`
+If OpenCode is unavailable, readiness must fail (503).
 
-## 5. Policy Engine Contract
+## 6. Config Surface
 
-Input:
-- `ProposedAction` with `riskLevel`, `sideEffectType`, `payloadHash`, `target`.
+Primary source:
+- JSON file at `DELEGATE_CONFIG_PATH` or default `~/.config/delegate-assistant/config.json`
+- missing/invalid config file fails startup
 
-Output:
-- `allow`
-- `deny` (with reason code)
-- `requires_approval` (with required confirmation mode)
-
-Reason code examples:
-- `MISSING_APPROVAL`
-- `GUARDRAIL_PROTECTED_PATH`
-- `DENIED_PREVIOUSLY`
-- `INSUFFICIENT_SCOPE`
-
-## 6. Approval Mechanics
-
-Token design:
-- Signed opaque token or random id with DB lookup.
-- Bound to immutable tuple:
-  - `workItemId`
-  - `actionType`
-  - `payloadHash`
-  - `expiresAt`
-
-Rules:
-- Single consumption.
-- Expired token is invalid.
-- Mismatched payload hash rejects execution.
-
-## 7. ModelPort v0 Contract
-
-`plan(input)` returns:
-- intent summary
-- assumptions
-- ambiguities/questions
-- concrete action candidates (with risk hints)
-
-`generate(input)` returns:
-- patch/proposed files/messages
-- execution notes
-
-`review(input)` returns:
-- issues
-- risk flags
-- test checklist outcomes
-
-Prompting constraints:
-- Include policy summary in system/developer prompt sections.
-- Do not include secrets.
-- Keep response format strict JSON for parse safety.
-
-## 8. Telegram Adapter Behavior
-
-Inbound parsing:
-- Plain text is the primary interaction surface and runs through conversation-first model response.
-- `/start` is honored only as the first message in a chat; later `/start` messages are ignored.
-- Natural approvals/denials/revisions are context-bound to active approval prompts.
-- Natural approval/denial phrases use a strict allow-list in M6 and require clarification when no pending proposal exists.
-- All other slash-prefixed text is treated as normal chat input.
-
-Outbound style:
-- concise summary
-- explicit next step
-- if approval is needed, include action, risk, side effects, expiry, and `Approve / Revise / Deny`
-- expose full details only on demand (`details`/`verbose` style responses)
-
-## 9. GitHub Adapter Behavior
-
-v0 capabilities:
-- create branch
-- commit file changes
-- push branch
-- create PR
-
-Required metadata:
-- link back to `workItemId` in PR body
-- include checks/limitations summary in PR body where available
-
-Failure handling:
-- map API/git failures to typed `VcsError`.
-- persist retry-eligible vs non-retry-eligible classification.
-- reconcile idempotent outcomes (if PR already exists for branch and diff matches, report success rather than false failure).
-
-## 10. SQLite Schema v0
-
-Minimum table set:
-- `work_items`
-- `approvals`
-- `plans`
-- `executions`
-- `audit_events`
-- `messages`
-- `generated_artifacts`
-
-Recommended indexes:
-- `work_items(status, updated_at)`
-- `approvals(work_item_id, status)`
-- `audit_events(work_item_id, timestamp)`
-
-## 11. Reliability and Recovery
-
-On startup:
-- recover in-flight work items from SQLite.
-- resume `approval_pending` and `executing` based on safe resume policy.
-
-Retry policy:
-- transient adapter errors retry with backoff.
-- policy denials and approval denials never retry automatically.
-
-Idempotency:
-- external execution steps keyed with idempotency token.
-
-## 12. Testing Matrix
-
-Unit tests:
-- state machine transition validity.
-- policy decisions and guardrail classification.
-- approval token integrity checks.
-
-Contract tests:
-- each adapter satisfies corresponding port semantics.
-
-Integration tests:
-- Telegram delegation to approval flow.
-- approved PR publish path.
-- denied action remains non-executed.
-
-Security tests:
-- redaction pipeline removes secret-like patterns.
-- no secret-bearing fields enter audit payloads.
-
-## 13. Initial Config Surface
-
-Primary config source:
-- JSON file path: `DELEGATE_CONFIG_PATH` or default `~/.config/delegate-assistant/config.json`
-- Missing/invalid file fails boot immediately with a clear error
-
-JSON keys:
+Required keys:
 - `port`
-- `nodeEnv`
-- `enableInternalRoutes`
 - `sqlitePath`
-- `auditLogPath`
 - `telegramBotToken`
 - `telegramPollIntervalMs`
-- `modelProvider` (`stub` | `opencode_cli`)
+- `modelProvider` (`stub|opencode_cli`)
 - `opencodeBin`
 - `modelName`
 - `assistantRepoPath`
-- `githubBaseBranch`
-- `executionIntentConfidenceThreshold` (`0..1`)
-- `previewDiffFirst` (`true|false`)
+- `opencodeAttachUrl`
+- `opencodeAutoStart`
+- `opencodeServeHost`
+- `opencodeServePort`
+- `sessionIdleTimeoutMs`
+- `sessionMaxConcurrent`
+- `sessionRetryAttempts`
 
-Environment overrides (optional, higher precedence):
-- `PORT`, `NODE_ENV`, `ENABLE_INTERNAL_ROUTES`
-- `SQLITE_PATH`, `AUDIT_LOG_PATH`
-- `TELEGRAM_BOT_TOKEN`, `TELEGRAM_POLL_INTERVAL_MS`
-- `MODEL_PROVIDER`, `OPENCODE_BIN`, `MODEL_NAME`
-- `ASSISTANT_REPO_PATH`, `GITHUB_BASE_BRANCH`
-- `EXECUTION_INTENT_CONFIDENCE_THRESHOLD`
-- `PREVIEW_DIFF_FIRST`
+Optional env overrides:
+- `PORT`, `SQLITE_PATH`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_POLL_INTERVAL_MS`
+- `MODEL_PROVIDER`, `OPENCODE_BIN`, `MODEL_NAME`, `ASSISTANT_REPO_PATH`
+- `OPENCODE_ATTACH_URL`, `OPENCODE_AUTO_START`, `OPENCODE_SERVE_HOST`, `OPENCODE_SERVE_PORT`
+- `SESSION_IDLE_TIMEOUT_MS`, `SESSION_MAX_CONCURRENT`, `SESSION_RETRY_ATTEMPTS`
 
-## 14. M6 + M7 Interaction Contracts
+## 7. In-Scope Packages
 
-M6 conversation bootstrap:
-- conversation-first chat loop with model-inferred execution proposals
-- compact response composer by default
-- freeform revise loop regenerating proposal plan and artifact before execution
-- context-bound natural approval/denial phrases from a strict allow-list
-- no slash commands except first-message `/start`
-- execution proposal is accepted only when confidence >= configured threshold
-- strict starter phrases: approve (`approve`, `go ahead`, `yes, approve`, `ship it`) and deny (`deny`, `no, deny`, `stop this`, `do not proceed`)
+Hot path:
+- `apps/assistant-core/src/main.ts`
+- `apps/assistant-core/src/worker.ts`
+- `apps/assistant-core/src/http.ts`
+- `apps/assistant-core/src/opencode-server.ts`
+- `apps/assistant-core/src/session-store.ts`
+- `packages/adapters-telegram/src/index.ts`
+- `packages/adapters-model-opencode-cli/src/index.ts`
 
-M7 adaptive memory:
-- recall context before plan/generate
-- remember only high-confidence preference/pattern/fact/decision/insight candidates
-- forget-by-phrase orchestration: `recall -> resolve id -> forget`
-- memory outage handling is surfaced to users and rate-limited
+Legacy workflow-oriented modules may remain in the repository but are not part of the relay runtime path.
 
-## 15. Review Gates Before Coding
+## 8. Acceptance Checks
 
-Before implementation starts, confirm:
-- event schema naming and stability expectations.
-- confidence threshold for execution proposal promotion in Telegram.
-- PR body template and required metadata.
-- sensitive path list for `CRITICAL` classification.
-
-After confirmation, implementation can proceed in incremental vertical slices.
+- DM and topic messages create/continue independent OpenCode sessions.
+- Restarting assistant runtime preserves session continuity via persisted mapping.
+- If OpenCode server is down, runtime auto-starts it and resumes service.
+- If a resumed session is stale, one retry with fresh session succeeds or user gets immediate outage message.
+- `bun run verify` passes.
