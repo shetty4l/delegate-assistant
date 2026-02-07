@@ -24,13 +24,6 @@
         "@delegate/ports": "workspace:*",
       },
     },
-    "packages/adapters-github": {
-      "name": "@delegate/adapters-github",
-      "dependencies": {
-        "@delegate/domain": "workspace:*",
-        "@delegate/ports": "workspace:*",
-      },
-    },
     "packages/adapters-model-opencode-cli": {
       "name": "@delegate/adapters-model-opencode-cli",
       "dependencies": {
@@ -45,13 +38,6 @@
         "@delegate/ports": "workspace:*",
       },
     },
-    "packages/adapters-sqlite": {
-      "name": "@delegate/adapters-sqlite",
-      "dependencies": {
-        "@delegate/domain": "workspace:*",
-        "@delegate/ports": "workspace:*",
-      },
-    },
     "packages/adapters-telegram": {
       "name": "@delegate/adapters-telegram",
       "dependencies": {
@@ -59,22 +45,8 @@
         "@delegate/ports": "workspace:*",
       },
     },
-    "packages/audit": {
-      "name": "@delegate/audit",
-      "dependencies": {
-        "@delegate/domain": "workspace:*",
-        "@delegate/ports": "workspace:*",
-      },
-    },
     "packages/domain": {
       "name": "@delegate/domain",
-    },
-    "packages/policy": {
-      "name": "@delegate/policy",
-      "dependencies": {
-        "@delegate/domain": "workspace:*",
-        "@delegate/ports": "workspace:*",
-      },
     },
     "packages/ports": {
       "name": "@delegate/ports",
@@ -106,23 +78,15 @@
 
     "@biomejs/cli-win32-x64": ["@biomejs/cli-win32-x64@2.3.14", "", { "os": "win32", "cpu": "x64" }, "sha512-oizCjdyQ3WJEswpb3Chdngeat56rIdSYK12JI3iI11Mt5T5EXcZ7WLuowzEaFPNJ3zmOQFliMN8QY1Pi+qsfdQ=="],
 
-    "@delegate/adapters-github": ["@delegate/adapters-github@workspace:packages/adapters-github"],
-
     "@delegate/adapters-model-opencode-cli": ["@delegate/adapters-model-opencode-cli@workspace:packages/adapters-model-opencode-cli"],
 
     "@delegate/adapters-model-stub": ["@delegate/adapters-model-stub@workspace:packages/adapters-model-stub"],
-
-    "@delegate/adapters-sqlite": ["@delegate/adapters-sqlite@workspace:packages/adapters-sqlite"],
 
     "@delegate/adapters-telegram": ["@delegate/adapters-telegram@workspace:packages/adapters-telegram"],
 
     "@delegate/assistant-core": ["@delegate/assistant-core@workspace:apps/assistant-core"],
 
-    "@delegate/audit": ["@delegate/audit@workspace:packages/audit"],
-
     "@delegate/domain": ["@delegate/domain@workspace:packages/domain"],
-
-    "@delegate/policy": ["@delegate/policy@workspace:packages/policy"],
 
     "@delegate/ports": ["@delegate/ports@workspace:packages/ports"],
 
