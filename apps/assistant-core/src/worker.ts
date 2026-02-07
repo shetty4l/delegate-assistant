@@ -34,6 +34,7 @@ type WorkerOptions = {
   sessionIdleTimeoutMs?: number;
   sessionMaxConcurrent?: number;
   sessionRetryAttempts?: number;
+  relayTimeoutMs?: number;
 };
 
 type LogFields = Record<string, string | number | boolean | null>;
@@ -85,6 +86,28 @@ const sendMessage = async (
 
 const buildSessionKey = (message: InboundMessage): string =>
   `${message.chatId}:${message.threadId ?? "root"}`;
+
+const withTimeout = async <T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  label: string,
+): Promise<T> => {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
+};
 
 const upsertSessionInMemory = (
   sessionKey: string,
@@ -190,6 +213,7 @@ export const handleChatMessage = async (
   const sessionIdleTimeoutMs = options.sessionIdleTimeoutMs ?? 45 * 60 * 1000;
   const sessionMaxConcurrent = options.sessionMaxConcurrent ?? 5;
   const sessionRetryAttempts = options.sessionRetryAttempts ?? 1;
+  const relayTimeoutMs = options.relayTimeoutMs ?? 30_000;
 
   await evictIdleSessions(deps, sessionIdleTimeoutMs, sessionMaxConcurrent);
 
@@ -231,11 +255,16 @@ export const handleChatMessage = async (
   let lastError: unknown = null;
 
   for (let attempt = 0; attempt <= sessionRetryAttempts; attempt += 1) {
+    const attemptedSessionId = sessionId;
     try {
-      const response = await deps.modelPort.respond({
-        ...baseInput,
-        sessionId,
-      });
+      const response = await withTimeout(
+        deps.modelPort.respond({
+          ...baseInput,
+          sessionId,
+        }),
+        relayTimeoutMs,
+        "relay turn",
+      );
 
       if (response.sessionId) {
         await persistSessionId(deps, sessionKey, response.sessionId);
@@ -258,10 +287,35 @@ export const handleChatMessage = async (
       return;
     } catch (error) {
       lastError = error;
+      const errorText = String(error);
+      const isTimeout = /timed out/i.test(errorText);
+      logError(isTimeout ? "relay.timeout" : "relay.error", {
+        chatId: message.chatId,
+        sessionKey,
+        attempt,
+        resumedSession: attemptedSessionId !== null,
+        error: errorText,
+      });
+
       sessionId = null;
-      sessionByKey.delete(sessionKey);
-      if (deps.sessionStore) {
-        await deps.sessionStore.markStale(sessionKey, nowIso());
+      if (attemptedSessionId) {
+        sessionByKey.delete(sessionKey);
+        if (deps.sessionStore) {
+          await deps.sessionStore.markStale(sessionKey, nowIso());
+        }
+        logInfo("relay.session_stale_marked", {
+          chatId: message.chatId,
+          sessionKey,
+          staleSessionId: attemptedSessionId,
+        });
+      }
+
+      if (attempt < sessionRetryAttempts) {
+        logInfo("relay.retry_fresh_session", {
+          chatId: message.chatId,
+          sessionKey,
+          nextAttempt: attempt + 1,
+        });
       }
     }
   }
@@ -271,9 +325,9 @@ export const handleChatMessage = async (
     {
       chatId: message.chatId,
       threadId: message.threadId ?? null,
-      text: `OpenCode is unavailable right now: ${String(lastError)}. Please retry in a moment.`,
+      text: "I couldn't reach OpenCode for this request. I reset the session and you can retry now.",
     },
-    { action: "relay", stage: "failed" },
+    { action: "relay", stage: "failed", error: String(lastError) },
   );
 };
 

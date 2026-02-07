@@ -6,6 +6,7 @@ type OpencodeModelAdapterOptions = {
   model?: string;
   repoPath?: string;
   attachUrl?: string | null;
+  responseTimeoutMs?: number;
 };
 
 type SessionCommandResult = {
@@ -20,12 +21,14 @@ export class OpencodeCliModelAdapter implements ModelPort {
   private readonly model: string;
   private readonly repoPath: string;
   private readonly attachUrl: string | null;
+  private readonly responseTimeoutMs: number;
 
   constructor(options: OpencodeModelAdapterOptions = {}) {
     this.binaryPath = options.binaryPath ?? "opencode";
     this.model = options.model ?? "openai/gpt-5.3-codex";
     this.repoPath = options.repoPath ?? process.cwd();
     this.attachUrl = options.attachUrl ?? null;
+    this.responseTimeoutMs = options.responseTimeoutMs ?? 30_000;
   }
 
   async respond(input: RespondInput): Promise<ModelTurnResponse> {
@@ -37,6 +40,12 @@ export class OpencodeCliModelAdapter implements ModelPort {
       const details = result.stderr.trim() || result.textOutput || "no output";
       throw new Error(
         `opencode relay failed with exit=${result.exitCode}: ${details}`,
+      );
+    }
+
+    if (!result.textOutput) {
+      throw new Error(
+        "opencode relay produced no user-facing text output (possibly blocked tool call)",
       );
     }
 
@@ -98,11 +107,38 @@ export class OpencodeCliModelAdapter implements ModelPort {
       stdout: "pipe",
       stderr: "pipe",
     });
-    const [stdout, stderr, exitCode] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ]);
+
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let stdout: string;
+    let stderr: string;
+    let exitCode: number;
+    try {
+      [stdout, stderr, exitCode] = await Promise.race([
+        Promise.all([
+          new Response(proc.stdout).text(),
+          new Response(proc.stderr).text(),
+          proc.exited,
+        ]),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => {
+            try {
+              proc.kill();
+            } catch {
+              // no-op
+            }
+            reject(
+              new Error(
+                `opencode relay timed out after ${this.responseTimeoutMs}ms`,
+              ),
+            );
+          }, this.responseTimeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timer) {
+        clearTimeout(timer);
+      }
+    }
 
     let parsedSessionId: string | null = null;
     const textParts: string[] = [];

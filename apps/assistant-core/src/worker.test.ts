@@ -43,6 +43,7 @@ class MemorySessionStore {
     string,
     { opencodeSessionId: string; lastUsedAt: string }
   >();
+  readonly staleMarks: string[] = [];
 
   async getSession(sessionKey: string) {
     return this.sessions.get(sessionKey) ?? null;
@@ -60,7 +61,9 @@ class MemorySessionStore {
     });
   }
 
-  async markStale(_sessionKey: string, _updatedAt: string) {}
+  async markStale(sessionKey: string, _updatedAt: string) {
+    this.staleMarks.push(sessionKey);
+  }
   async getCursor(): Promise<number | null> {
     return null;
   }
@@ -70,8 +73,9 @@ class MemorySessionStore {
 const inbound = (
   text: string,
   threadId: string | null = null,
+  chatId = "chat-1",
 ): InboundMessage => ({
-  chatId: "chat-1",
+  chatId,
   threadId,
   text,
   receivedAt: new Date().toISOString(),
@@ -148,5 +152,55 @@ describe("telegram opencode relay", () => {
     expect(chatPort.sent[0]?.text).toBe("fresh-session-ok");
     const persisted = await store.getSession("chat-1:root");
     expect(persisted?.opencodeSessionId).toBe("ses-new");
+    expect(store.staleMarks).toContain("chat-1:root");
+  });
+
+  test("times out a hung resumed session and retries fresh session", async () => {
+    const chatPort = new CapturingChatPort();
+    const store = new MemorySessionStore();
+    await store.upsertSession({
+      sessionKey: "chat-timeout-retry:root",
+      opencodeSessionId: "ses-hung",
+      lastUsedAt: new Date().toISOString(),
+      status: "active",
+    });
+
+    const model = new ScriptedModel(async (input) => {
+      if (input.sessionId === "ses-hung") {
+        return await new Promise<ModelTurnResponse>(() => {});
+      }
+      return {
+        mode: "chat_reply",
+        confidence: 1,
+        replyText: "recovered",
+        sessionId: "ses-new",
+      };
+    });
+
+    await handleChatMessage(
+      { chatPort, modelPort: model, sessionStore: store },
+      inbound("hello", null, "chat-timeout-retry"),
+      { sessionRetryAttempts: 1, relayTimeoutMs: 20 },
+    );
+
+    expect(chatPort.sent[0]?.text).toBe("recovered");
+    expect(store.staleMarks).toContain("chat-timeout-retry:root");
+  });
+
+  test("sends fallback message after timeout and failed retry", async () => {
+    const chatPort = new CapturingChatPort();
+    const store = new MemorySessionStore();
+
+    const model = new ScriptedModel(async () => {
+      return await new Promise<ModelTurnResponse>(() => {});
+    });
+
+    await handleChatMessage(
+      { chatPort, modelPort: model, sessionStore: store },
+      inbound("hello", null, "chat-timeout-fail"),
+      { sessionRetryAttempts: 1, relayTimeoutMs: 20 },
+    );
+
+    expect(chatPort.sent[0]?.text).toContain("I couldn't reach OpenCode");
   });
 });
