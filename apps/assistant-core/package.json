@@ -1,0 +1,18 @@
+{
+  "name": "@delegate/assistant-core",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun run src/main.ts",
+    "typecheck": "bunx tsc --project tsconfig.json --noEmit",
+    "build": "bun build src/main.ts --target bun --outdir dist",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@delegate/adapters-sqlite": "workspace:*",
+    "@delegate/audit": "workspace:*",
+    "@delegate/domain": "workspace:*",
+    "@delegate/ports": "workspace:*",
+    "effect": "^3.17.14"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "name": "@delegate/ports",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@delegate/domain": "workspace:*"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

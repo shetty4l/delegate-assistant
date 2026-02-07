@@ -1,0 +1,11 @@
+{
+  "plugins": [
+    "remark-preset-lint-recommended",
+    [
+      "remark-validate-links",
+      {
+        "repository": false
+      }
+    ]
+  ]
+}
