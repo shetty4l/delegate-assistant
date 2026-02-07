@@ -5,6 +5,13 @@ Status: active
 ## Purpose
 Provide an execution-first plan for delivering v0 in small vertical slices with strict approval gates and full auditability.
 
+## Milestone Status
+- M1 Foundation Tracer Bullet: complete
+- M2 Telegram Delegation + Planning: complete
+- M3 Policy + Approval Integrity: next
+- M4 Approval-Gated GitHub PR Publish: not started
+- M5 Explainability, Recovery, and Test Matrix: not started
+
 ## Non-Goals (v0)
 - Autonomous monitoring loops
 - Automatic email sending
@@ -90,7 +97,14 @@ Exit criteria:
 - No externally visible side effects without approval
 - Assistant identity separation preserved
 - Full traceability for delegated workflows
-- Feedback loops green: `typecheck`, `test`, `lint`
+- Feedback loops green via `bun run verify` (`typecheck`, `lint`, `format:check`, `build`, `test`, `docs:check`)
+
+## CI Contract
+- Single quality gate command: `bun run verify`
+- CI workflow trigger policy:
+  - `pull_request` on all branches
+  - `push` on `main`
+- CI execution policy: fail fast and strict (warnings or check failures fail the run)
 
 ## Progress Log
 
@@ -100,6 +114,12 @@ Template:
 - Decisions:
 - Files changed:
 - Blockers/notes:
+
+2026-02-07
+- Completed: M2 Telegram delegation + planning slice with real Telegram long polling adapter, deterministic planner stub, persisted plans, command router, and status responses.
+- Decisions: Deferred real OpenAI integration; `/status` is functional in M2 while `/approve` and `/deny` return explicit M3 placeholders; approval preview includes fixed "would expire in 24h" copy.
+- Files changed: `apps/assistant-core/src/main.ts`, `apps/assistant-core/src/config.ts`, `apps/assistant-core/src/worker.ts`, `apps/assistant-core/src/worker.test.ts`, `apps/assistant-core/package.json`, `packages/domain/src/index.ts`, `packages/ports/src/index.ts`, `packages/adapters-sqlite/src/index.ts`, `packages/adapters-sqlite/src/index.test.ts`, `packages/adapters-telegram/package.json`, `packages/adapters-telegram/src/index.ts`, `packages/adapters-model-stub/package.json`, `packages/adapters-model-stub/src/index.ts`.
+- Blockers/notes: `TELEGRAM_BOT_TOKEN` is required to run live polling; worker remains disabled when token is unset.
 
 2026-02-07
 - Completed: Refactored docs to Johnny Decimal structure and created active v0 working plan.

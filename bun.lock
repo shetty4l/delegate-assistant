@@ -17,15 +17,31 @@
     "apps/assistant-core": {
       "name": "@delegate/assistant-core",
       "dependencies": {
+        "@delegate/adapters-model-stub": "workspace:*",
         "@delegate/adapters-sqlite": "workspace:*",
+        "@delegate/adapters-telegram": "workspace:*",
         "@delegate/audit": "workspace:*",
         "@delegate/domain": "workspace:*",
         "@delegate/ports": "workspace:*",
         "effect": "^3.17.14",
       },
     },
+    "packages/adapters-model-stub": {
+      "name": "@delegate/adapters-model-stub",
+      "dependencies": {
+        "@delegate/domain": "workspace:*",
+        "@delegate/ports": "workspace:*",
+      },
+    },
     "packages/adapters-sqlite": {
       "name": "@delegate/adapters-sqlite",
+      "dependencies": {
+        "@delegate/domain": "workspace:*",
+        "@delegate/ports": "workspace:*",
+      },
+    },
+    "packages/adapters-telegram": {
+      "name": "@delegate/adapters-telegram",
       "dependencies": {
         "@delegate/domain": "workspace:*",
         "@delegate/ports": "workspace:*",
@@ -71,7 +87,11 @@
 
     "@biomejs/cli-win32-x64": ["@biomejs/cli-win32-x64@2.3.14", "", { "os": "win32", "cpu": "x64" }, "sha512-oizCjdyQ3WJEswpb3Chdngeat56rIdSYK12JI3iI11Mt5T5EXcZ7WLuowzEaFPNJ3zmOQFliMN8QY1Pi+qsfdQ=="],
 
+    "@delegate/adapters-model-stub": ["@delegate/adapters-model-stub@workspace:packages/adapters-model-stub"],
+
     "@delegate/adapters-sqlite": ["@delegate/adapters-sqlite@workspace:packages/adapters-sqlite"],
+
+    "@delegate/adapters-telegram": ["@delegate/adapters-telegram@workspace:packages/adapters-telegram"],
 
     "@delegate/assistant-core": ["@delegate/assistant-core@workspace:apps/assistant-core"],
 

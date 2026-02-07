@@ -9,7 +9,45 @@ export type WorkItem = {
   updatedAt: string;
 };
 
-export type AuditEventType = "work_item.delegated";
+export type PlanRiskLevel = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+
+export type PlanSideEffectType =
+  | "none"
+  | "local_code_changes"
+  | "external_publish";
+
+export type ExecutionPlanDraft = {
+  intentSummary: string;
+  assumptions: string[];
+  ambiguities: string[];
+  proposedNextStep: string;
+  riskLevel: PlanRiskLevel;
+  sideEffects: PlanSideEffectType[];
+  requiresApproval: boolean;
+};
+
+export type ExecutionPlan = {
+  id: string;
+  workItemId: string;
+  createdAt: string;
+} & ExecutionPlanDraft;
+
+export type InboundMessage = {
+  chatId: string;
+  text: string;
+  receivedAt: string;
+  sourceMessageId?: string;
+};
+
+export type OutboundMessage = {
+  chatId: string;
+  text: string;
+};
+
+export type AuditEventType =
+  | "work_item.delegated"
+  | "work_item.triaged"
+  | "plan.created";
 
 export type AuditEvent = {
   eventId: string;
