@@ -94,6 +94,47 @@ describe("SqliteWorkItemStore", () => {
     expect(latest?.decisionReason).toBe("APPROVED");
   });
 
+  test("lists pending approvals for recovery", async () => {
+    const now = new Date().toISOString();
+    const workItem: WorkItem = {
+      id: "work-item-recovery",
+      traceId: "trace-recovery",
+      status: "approval_pending",
+      summary: "Recover pending approvals",
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    await store.create(workItem);
+    await store.createApproval({
+      id: "approval-pending",
+      workItemId: workItem.id,
+      actionType: "publish_pr",
+      payloadHash: "hash-pending",
+      status: "pending",
+      requestedAt: now,
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      consumedAt: null,
+      decisionReason: null,
+    });
+    await store.createApproval({
+      id: "approval-approved",
+      workItemId: workItem.id,
+      actionType: "publish_pr",
+      payloadHash: "hash-approved",
+      status: "approved",
+      requestedAt: now,
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      consumedAt: now,
+      decisionReason: "APPROVED",
+    });
+
+    const pending = await store.listPendingApprovals();
+    expect(pending.map((approval) => approval.id)).toEqual([
+      "approval-pending",
+    ]);
+  });
+
   test("persists generated artifact by work item", async () => {
     const now = new Date().toISOString();
     const workItem: WorkItem = {

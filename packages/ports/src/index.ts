@@ -39,6 +39,7 @@ export interface ApprovalStore {
   getLatestApprovalByWorkItemId(
     workItemId: string,
   ): Promise<ApprovalRecord | null>;
+  listPendingApprovals(): Promise<ApprovalRecord[]>;
   updateApprovalStatus(
     approvalId: string,
     status: ApprovalStatus,

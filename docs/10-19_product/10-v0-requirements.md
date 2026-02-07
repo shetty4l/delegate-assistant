@@ -36,6 +36,16 @@ This document defines what the system must do, not how it is implemented.
 - Capabilities are added incrementally via modules.
 - No single integration should be required for core operation.
 
+### 2.6 Language-First Interaction
+- The assistant should default to natural language, not command-heavy UX.
+- Slash commands are fallback controls, not the primary interaction model.
+- Approval confirmations must stay explicit and context-bound.
+
+### 2.7 Adaptive Chief-of-Staff Behavior
+- The assistant should evolve its collaboration style over time based on high-confidence observed preferences.
+- Behavioral updates should be proposed conversationally and adopted only with user confirmation.
+- Users must be able to ask the assistant to forget previously learned preferences.
+
 ## 3. Communication Surface
 
 ### 3.1 Primary Interface
@@ -46,6 +56,8 @@ This document defines what the system must do, not how it is implemented.
 - Conversations are treated as requests, not commands.
 - The assistant may ask clarifying questions when intent is ambiguous.
 - Responses default to concise summaries and next steps.
+- Planning should be collaborative by default; execution should happen only after explicit user intent.
+- Approval prompts should consistently present `Approve`, `Revise`, and `Deny` choices.
 
 ## 4. Assistant Identity
 
@@ -123,6 +135,7 @@ This document defines what the system must do, not how it is implemented.
   - why it took an action
   - what information it used
   - what alternatives were considered
+- If memory infrastructure is degraded, the assistant should disclose that condition without overwhelming the conversation.
 
 ## 9. v0 Scope Boundaries
 
@@ -139,6 +152,7 @@ This document defines what the system must do, not how it is implemented.
 - Automatic PR merging
 - Multi-user collaboration
 - Full project management system
+- Fully predefined reminder/scheduling UX (should emerge through iterative collaboration)
 
 ## 10. Open Decisions (Deferred)
 - Assistant name / handle

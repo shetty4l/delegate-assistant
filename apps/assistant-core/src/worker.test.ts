@@ -31,7 +31,11 @@ import type {
   WorkItemStore,
 } from "@delegate/ports";
 
-import { handleChatMessage, parseCommand } from "./worker";
+import {
+  handleChatMessage,
+  parseCommand,
+  recoverInFlightWorkItems,
+} from "./worker";
 
 class InMemoryWorkItemStore implements WorkItemStore {
   private readonly items = new Map<string, WorkItem>();
@@ -106,6 +110,12 @@ class InMemoryApprovalStore implements ApprovalStore {
           : 0,
     );
     return values[0] ?? null;
+  }
+
+  async listPendingApprovals(): Promise<ApprovalRecord[]> {
+    return [...this.approvals.values()].filter(
+      (approval) => approval.status === "pending",
+    );
   }
 
   async updateApprovalStatus(
@@ -341,6 +351,22 @@ describe("handleChatMessage", () => {
     expect(state.chatPort.sent[1]?.text).toContain("approval=pending");
   });
 
+  test("returns explain output for a known work item", async () => {
+    const state = setup();
+
+    await handleChatMessage(
+      state.deps,
+      inbound("Please publish a PR for this refactor"),
+    );
+
+    const workItemId = state.workItemStore.all()[0]!.id;
+    await handleChatMessage(state.deps, inbound(`/explain ${workItemId}`));
+
+    expect(state.chatPort.sent[1]?.text).toContain(`Work item ${workItemId}`);
+    expect(state.chatPort.sent[1]?.text).toContain("Why:");
+    expect(state.chatPort.sent[1]?.text).toContain("Alternatives:");
+  });
+
   test("approves once and rejects replay", async () => {
     const state = setup();
 
@@ -422,5 +448,27 @@ describe("handleChatMessage", () => {
     expect(state.chatPort.sent[0]?.text).toContain(
       "Unable to generate changes",
     );
+  });
+
+  test("recovery expires stale pending approvals", async () => {
+    const state = setup();
+
+    await handleChatMessage(
+      state.deps,
+      inbound("Please publish a PR for this refactor"),
+    );
+
+    const approval = state.approvalStore.all()[0]!;
+    state.approvalStore.tamperExpiry(approval.id, "2000-01-01T00:00:00.000Z");
+
+    const result = await recoverInFlightWorkItems({
+      approvalStore: state.deps.approvalStore,
+      workItemStore: state.deps.workItemStore,
+      auditPort: state.deps.auditPort,
+    });
+
+    expect(result).toEqual({ expiredApprovals: 1, cancelledWorkItems: 1 });
+    expect(state.approvalStore.all()[0]?.status).toBe("expired");
+    expect(state.workItemStore.all()[0]?.status).toBe("cancelled");
   });
 });

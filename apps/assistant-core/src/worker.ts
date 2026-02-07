@@ -163,6 +163,42 @@ const formatPlanResponse = (
   return lines.join("\n");
 };
 
+const formatExplainResponse = (input: {
+  workItem: WorkItem;
+  plan: ExecutionPlan | null;
+  approval: ApprovalRecord | null;
+  artifact: GeneratedFileArtifact | null;
+}): string => {
+  const { workItem, plan, approval, artifact } = input;
+  const alternatives = plan?.ambiguities.length
+    ? plan.ambiguities.join("; ")
+    : "No unresolved alternatives recorded.";
+  const assumptions = plan?.assumptions.length
+    ? plan.assumptions.join("; ")
+    : "No assumptions recorded.";
+
+  const lines = [
+    `Work item ${workItem.id}`,
+    `Status: ${workItem.status}`,
+    `Why: ${plan?.intentSummary ?? workItem.summary}`,
+    `What I used: summary='${workItem.summary}'; assumptions=${assumptions}`,
+    `Alternatives: ${alternatives}`,
+    `Current step: ${plan?.proposedNextStep ?? "No plan recorded."}`,
+  ];
+
+  if (artifact) {
+    lines.push(`Artifact: ${artifact.path}`);
+  }
+
+  if (approval) {
+    lines.push(
+      `Approval: ${approval.status} (${approval.id}, expires ${approval.expiresAt})`,
+    );
+  }
+
+  return lines.join("\n");
+};
+
 const appendAuditEvent = async (
   auditPort: AuditPort,
   event: AuditEvent,
@@ -249,6 +285,57 @@ const handleStatusCommand = async (
       text: `Work item ${workItem.id}: status=${workItem.status}; plan=${plan ? "ready" : "pending"}${approvalText}`,
     },
     { command: "status", workItemId },
+  );
+};
+
+const handleExplainCommand = async (
+  deps: WorkerDeps,
+  message: InboundMessage,
+  workItemId: string | null,
+): Promise<void> => {
+  if (!workItemId) {
+    await sendMessage(
+      deps.chatPort,
+      {
+        chatId: message.chatId,
+        text: "Usage: /explain <workItemId>",
+      },
+      { command: "explain" },
+    );
+    return;
+  }
+
+  const workItem = await deps.workItemStore.getById(workItemId);
+  if (!workItem) {
+    await sendMessage(
+      deps.chatPort,
+      {
+        chatId: message.chatId,
+        text: `No work item found for id ${workItemId}.`,
+      },
+      { command: "explain", workItemId },
+    );
+    return;
+  }
+
+  const [plan, approval, artifact] = await Promise.all([
+    deps.planStore.getPlanByWorkItemId(workItemId),
+    deps.approvalStore.getLatestApprovalByWorkItemId(workItemId),
+    deps.artifactStore.getArtifactByWorkItemId(workItemId),
+  ]);
+
+  await sendMessage(
+    deps.chatPort,
+    {
+      chatId: message.chatId,
+      text: formatExplainResponse({
+        workItem,
+        plan,
+        approval,
+        artifact,
+      }),
+    },
+    { command: "explain", workItemId },
   );
 };
 
@@ -601,14 +688,7 @@ export const handleChatMessage = async (
   }
 
   if (command.type === "explain") {
-    await sendMessage(
-      deps.chatPort,
-      {
-        chatId: message.chatId,
-        text: `Explain output activates in M5. For now use /status ${command.workItemId ?? "<workItemId>"}.`,
-      },
-      { command: "explain" },
-    );
+    await handleExplainCommand(deps, message, command.workItemId);
     return;
   }
 
@@ -862,6 +942,53 @@ export const handleChatMessage = async (
       command: "delegate",
     },
   );
+};
+
+export const recoverInFlightWorkItems = async (
+  deps: Pick<WorkerDeps, "approvalStore" | "workItemStore" | "auditPort">,
+): Promise<{ expiredApprovals: number; cancelledWorkItems: number }> => {
+  const pendingApprovals = await deps.approvalStore.listPendingApprovals();
+  let expiredApprovals = 0;
+  let cancelledWorkItems = 0;
+  const now = nowIso();
+
+  for (const approval of pendingApprovals) {
+    if (!isExpired(approval.expiresAt, now)) {
+      continue;
+    }
+
+    expiredApprovals += 1;
+    await deps.approvalStore.updateApprovalStatus(
+      approval.id,
+      "expired",
+      now,
+      "EXPIRED_ON_RECOVERY",
+    );
+
+    const workItem = await deps.workItemStore.getById(approval.workItemId);
+    if (workItem && workItem.status === "approval_pending") {
+      await deps.workItemStore.updateStatus(workItem.id, "cancelled", now);
+      cancelledWorkItems += 1;
+    }
+
+    await appendAuditEvent(deps.auditPort, {
+      eventId: crypto.randomUUID(),
+      eventType: "approval.rejected",
+      workItemId: approval.workItemId,
+      actor: "system",
+      timestamp: now,
+      traceId: workItem?.traceId ?? "unknown",
+      payload: {
+        approvalId: approval.id,
+        reason: "EXPIRED_ON_RECOVERY",
+      },
+    });
+  }
+
+  return {
+    expiredApprovals,
+    cancelledWorkItems,
+  };
 };
 
 export const startTelegramWorker = (
