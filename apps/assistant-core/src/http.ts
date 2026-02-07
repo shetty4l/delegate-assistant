@@ -1,12 +1,10 @@
-import type { AuditPort, WorkItemStore } from "@delegate/ports";
-import { Effect } from "effect";
+import type { ModelPort } from "@delegate/ports";
 import type { AppConfig } from "./config";
-import { runTracer } from "./runtime";
 
 type Deps = {
   config: AppConfig;
-  workItemStore: WorkItemStore;
-  auditPort: AuditPort;
+  sessionStore: { ping(): Promise<void> };
+  modelPort: ModelPort;
 };
 
 const json = (payload: unknown, status = 200): Response =>
@@ -14,8 +12,8 @@ const json = (payload: unknown, status = 200): Response =>
 
 export const startHttpServer = ({
   config,
-  workItemStore,
-  auditPort,
+  sessionStore,
+  modelPort,
 }: Deps): void => {
   Bun.serve({
     port: config.port,
@@ -27,7 +25,7 @@ export const startHttpServer = ({
       }
 
       if (request.method === "GET" && url.pathname === "/ready") {
-        const checks = await runReadinessChecks({ workItemStore, auditPort });
+        const checks = await runReadinessChecks({ sessionStore, modelPort });
         if (checks.ok) {
           return json({ ok: true, status: "ready" });
         }
@@ -41,60 +39,32 @@ export const startHttpServer = ({
         );
       }
 
-      if (
-        request.method === "POST" &&
-        url.pathname === "/internal/tracer" &&
-        config.enableInternalRoutes
-      ) {
-        try {
-          const result = await Effect.runPromise(
-            runTracer({ workItemStore, auditPort }),
-          );
-
-          return json(
-            {
-              ok: true,
-              workItemId: result.workItem.id,
-              traceId: result.workItem.traceId,
-              eventId: result.event.eventId,
-            },
-            201,
-          );
-        } catch {
-          return json(
-            {
-              ok: false,
-              error: "tracer_failed",
-            },
-            500,
-          );
-        }
-      }
-
       return json({ ok: false, error: "not_found" }, 404);
     },
   });
 };
 
 const runReadinessChecks = async ({
-  workItemStore,
-  auditPort,
+  sessionStore,
+  modelPort,
 }: {
-  workItemStore: WorkItemStore;
-  auditPort: AuditPort;
+  sessionStore: { ping(): Promise<void> };
+  modelPort: ModelPort;
 }): Promise<{ ok: true } | { ok: false; reasons: string[] }> => {
   const reasons: string[] = [];
 
   try {
-    await workItemStore.ping();
+    await sessionStore.ping();
   } catch {
-    reasons.push("db_unreachable");
+    reasons.push("session_store_unreachable");
   }
 
-  try {
-    await auditPort.ping();
-  } catch {
-    reasons.push("audit_unwritable");
+  if (modelPort.ping) {
+    try {
+      await modelPort.ping();
+    } catch {
+      reasons.push("opencode_unavailable");
+    }
   }
 
   if (reasons.length > 0) {

@@ -1,123 +1,6 @@
-export type WorkItemStatus =
-  | "delegated"
-  | "triaged"
-  | "approval_pending"
-  | "approved"
-  | "denied"
-  | "cancelled";
-
-export type WorkItem = {
-  id: string;
-  traceId: string;
-  status: WorkItemStatus;
-  summary: string;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type PlanRiskLevel = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
-
-export type PlanSideEffectType =
-  | "none"
-  | "local_code_changes"
-  | "external_publish";
-
-export type ExecutionPlanDraft = {
-  intentSummary: string;
-  assumptions: string[];
-  ambiguities: string[];
-  proposedNextStep: string;
-  riskLevel: PlanRiskLevel;
-  sideEffects: PlanSideEffectType[];
-  requiresApproval: boolean;
-};
-
-export type GeneratedFileArtifact = {
-  path: string;
-  content: string;
-  summary: string;
-};
-
-export type GenerateInput = {
-  workItemId: string;
-  text: string;
-  plan: ExecutionPlanDraft;
-};
-
-export type GenerateResult = {
-  artifact: GeneratedFileArtifact;
-};
-
-export type ModelTurnResponse =
-  | {
-      mode: "chat_reply";
-      replyText: string;
-      confidence: number;
-    }
-  | {
-      mode: "execution_proposal";
-      replyText: string;
-      confidence: number;
-      plan: ExecutionPlanDraft;
-      artifact: GeneratedFileArtifact;
-    };
-
-export type ExecutionPlan = {
-  id: string;
-  workItemId: string;
-  createdAt: string;
-} & ExecutionPlanDraft;
-
-export type PolicyDecisionType = "allow" | "deny" | "requires_approval";
-
-export type PolicyReasonCode =
-  | "LOW_RISK_ALLOWED"
-  | "MISSING_APPROVAL"
-  | "GUARDRAIL_PROTECTED_PATH"
-  | "DENIED_PREVIOUSLY"
-  | "INSUFFICIENT_SCOPE";
-
-export type PolicyDecision = {
-  decision: PolicyDecisionType;
-  reasonCode: PolicyReasonCode;
-};
-
-export type ApprovalActionType = "publish_pr";
-
-export type ApprovalStatus = "pending" | "approved" | "denied" | "expired";
-
-export type ApprovalRecord = {
-  id: string;
-  workItemId: string;
-  actionType: ApprovalActionType;
-  payloadHash: string;
-  status: ApprovalStatus;
-  requestedAt: string;
-  expiresAt: string;
-  consumedAt: string | null;
-  decisionReason: string | null;
-};
-
-export type ApprovalRejectReason =
-  | "NOT_FOUND"
-  | "EXPIRED"
-  | "REPLAYED"
-  | "MISMATCH"
-  | "ALREADY_DENIED";
-
-export type PublishPrInput = {
-  workItemId: string;
-  summary: string;
-  artifact: GeneratedFileArtifact;
-};
-
-export type PublishPrResult = {
-  branchName: string;
-  pullRequestUrl: string;
-};
-
 export type InboundMessage = {
   chatId: string;
+  threadId?: string | null;
   text: string;
   receivedAt: string;
   sourceMessageId?: string;
@@ -125,32 +8,24 @@ export type InboundMessage = {
 
 export type OutboundMessage = {
   chatId: string;
+  threadId?: string | null;
   text: string;
 };
 
-export type AuditEventType =
-  | "work_item.delegated"
-  | "work_item.triaged"
-  | "plan.created"
-  | "artifact.generated"
-  | "approval.requested"
-  | "approval.granted"
-  | "approval.denied"
-  | "approval.rejected"
-  | "execution.started"
-  | "execution.completed"
-  | "execution.failed"
-  | "vcs.pr_published";
-
-export type AuditEvent = {
-  eventId: string;
-  eventType: AuditEventType;
-  workItemId: string;
-  actor: "assistant" | "system" | "user";
-  timestamp: string;
-  traceId: string;
-  payload: Record<string, unknown>;
+export type ModelTurnResponse = {
+  replyText: string;
+  sessionId?: string;
+  mode?: "chat_reply" | "execution_proposal";
+  confidence?: number;
 };
+
+export type WorkItemStatus =
+  | "delegated"
+  | "triaged"
+  | "approval_pending"
+  | "approved"
+  | "denied"
+  | "cancelled";
 
 const allowedTransitions: Record<
   WorkItemStatus,

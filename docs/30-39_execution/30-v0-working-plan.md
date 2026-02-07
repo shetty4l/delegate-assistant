@@ -3,16 +3,21 @@
 Status: active
 
 ## Purpose
-Provide an execution-first plan for delivering v0 in small vertical slices with strict approval gates and full auditability.
+Track execution of a lightweight Telegram-to-OpenCode bridge runtime with persistent topic sessions and minimal wrapper logic.
 
 ## Milestone Status
-- M1 Foundation Tracer Bullet: complete
-- M2 Telegram Delegation + Planning: complete
-- M3 Policy + Approval Integrity: complete
-- M4 Approval-Gated GitHub PR Publish: complete
-- M5 Explainability, Recovery, and Test Matrix: not started
-- M6 Conversation-First UX Bootstrap: planned
-- M7 Adaptive Memory via Engram: planned
+- Telegram <-> OpenCode relay runtime: complete
+- Topic-aware session continuity (`chatId:threadId`): complete
+- Persisted session/cursor store: complete
+- OpenCode auto-start + attach flow: complete
+- Docs/runtime simplification pass: complete
+
+## Canonical Runtime (Current)
+- Telegram is transport only.
+- OpenCode owns execution and safety behavior.
+- Wrapper owns routing, session continuity, retries, and readiness.
+- `/start` is first-message-only; all other turns are plain relay.
+- Historical milestone entries below remain as implementation history.
 
 ## Non-Goals (v0)
 - Autonomous monitoring loops
@@ -24,19 +29,13 @@ Provide an execution-first plan for delivering v0 in small vertical slices with 
 ## Locked Decisions
 - Package manager/runtime: `bun`
 - Primary interface: Telegram long polling
-- UX principle: language-first, commands-last (slash commands remain fallback)
-- Approval UX contract: always render `Approve / Revise / Deny`
-- Context-bound natural confirmations (for example, "go ahead") are valid only when an approval is actively pending
-- M6 revise behavior regenerates both plan and artifact, then issues a fresh approval payload hash
-- M6 natural approval/denial uses a strict allow-list phrase set (expand later with telemetry)
-- M6 `details` is one-shot intent (no persistent verbose mode)
-- M6 discussion-only intent suppresses plan/artifact generation until user explicitly asks for a plan
-- M6 strict natural confirmation starter set: approve (`approve`, `go ahead`, `yes, approve`, `ship it`) and deny (`deny`, `no, deny`, `stop this`, `do not proceed`)
-- Early phases keep assistant self-update code application operator-managed (manual apply)
+- Runtime model: thin Telegram wrapper over OpenCode sessions
+- Session key: `chatId:threadId` (`root` fallback)
+- OpenCode lifecycle: auto-start local `opencode serve` if attach endpoint unavailable
+- Readiness contract: fail `/ready` when OpenCode is unavailable
+- Session defaults: idle timeout 45m, max sessions 5, retry attempts 1
 - Memory namespace: global
 - Engram integration mode: external local service (no auth) with surfaced, rate-limited outage notices
-- `CRITICAL` actions require additional high-signal confirmation phrase
-- PR publish tracer bullet starts with minimal single-file patch path
 
 ## Milestones
 
@@ -239,3 +238,27 @@ Template:
 - Decisions: PR publishing now requires explicit publish-intent plus preview (branch/title/body) and approval; routine local edits auto-apply unless `previewDiffFirst=true`; destructive local intents require confirmation.
 - Files changed: `apps/assistant-core/src/worker.ts`, `apps/assistant-core/src/worker.test.ts`, `apps/assistant-core/src/main.ts`, `apps/assistant-core/src/config.ts`, `config/config.example.json`, `docs/30-39_execution/31-v0-implementation-blueprint.md`, `docs/30-39_execution/30-v0-working-plan.md`.
 - Blockers/notes: Action classification currently relies on intent heuristics (`publish` and destructive keyword patterns) and should later be replaced with model-side structured action typing.
+
+2026-02-08
+- Completed: Added persistent session mapping and cursor persistence primitives for Telegram topic-aware OpenCode session continuity.
+- Decisions: Session key now uses `chatId:threadId` (with `threadId=root` fallback), worker keeps in-memory LRU/idle session hints (`max=5`, `45m`) with SQLite persistence backing, and retries once with a fresh session when resumed session calls fail.
+- Files changed: `apps/assistant-core/src/session-store.ts`, `apps/assistant-core/src/worker.ts`, `apps/assistant-core/src/main.ts`, `apps/assistant-core/src/http.ts`, `apps/assistant-core/src/config.ts`, `packages/adapters-telegram/src/index.ts`, `packages/adapters-model-opencode-cli/src/index.ts`, `packages/adapters-model-stub/src/index.ts`, `packages/domain/src/index.ts`, `packages/ports/src/index.ts`, `config/config.example.json`, `docs/30-39_execution/30-v0-working-plan.md`.
+- Blockers/notes: Worker still retains legacy proposal/approval orchestration path; next slice should replace it with a pure Telegram-to-OpenCode relay.
+
+2026-02-08
+- Completed: Replaced runtime hot path with a thin Telegram-to-OpenCode session relay and added automatic `opencode serve` supervision.
+- Decisions: Wrapper now relays all non-`/start` messages directly through OpenCode sessions, session mapping persists by `chatId:threadId`, readiness hard-fails when OpenCode is unavailable, and runtime auto-starts OpenCode server if attach endpoint is not reachable.
+- Files changed: `apps/assistant-core/src/worker.ts`, `apps/assistant-core/src/worker.test.ts`, `apps/assistant-core/src/main.ts`, `apps/assistant-core/src/http.ts`, `apps/assistant-core/src/config.ts`, `apps/assistant-core/src/opencode-server.ts`, `apps/assistant-core/src/session-store.ts`, `packages/adapters-model-opencode-cli/src/index.ts`, `packages/adapters-telegram/src/index.ts`, `packages/domain/src/index.ts`, `packages/ports/src/index.ts`, `config/config.example.json`, `docs/30-39_execution/30-v0-working-plan.md`.
+- Blockers/notes: Legacy workflow-oriented domain/schema docs remain and should be slimmed in a follow-up docs-focused pass.
+
+2026-02-08
+- Completed: Stripped runtime dependencies and docs to align with the lightweight relay architecture.
+- Decisions: Removed workflow-only app dependencies and deleted obsolete tracer runtime module; execution blueprint now documents the Telegram-topic session bridge as the authoritative implementation.
+- Files changed: `apps/assistant-core/package.json`, `apps/assistant-core/src/config.ts`, `apps/assistant-core/src/main.ts`, `apps/assistant-core/src/http.ts`, `apps/assistant-core/src/runtime.ts`, `docs/30-39_execution/31-v0-implementation-blueprint.md`, `docs/30-39_execution/30-v0-working-plan.md`.
+- Blockers/notes: Repository still contains legacy workflow packages for history, but they are no longer wired into the assistant runtime path.
+
+2026-02-08
+- Completed: Reduced shared contracts to chat/session relay essentials and simplified stub behavior to match the thin bridge runtime.
+- Decisions: `@delegate/domain` now exposes minimal message/session response types plus legacy transition helper only; `@delegate/ports` now defines only `ChatPort` and `ModelPort` contracts needed by runtime.
+- Files changed: `packages/domain/src/index.ts`, `packages/ports/src/index.ts`, `packages/adapters-model-stub/src/index.ts`, `docs/30-39_execution/30-v0-working-plan.md`.
+- Blockers/notes: Legacy adapters that referenced removed workflow typings are intentionally out of runtime path and can be archived or deleted in a later cleanup milestone.
