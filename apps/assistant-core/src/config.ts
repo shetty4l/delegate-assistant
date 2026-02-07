@@ -7,6 +7,8 @@ export type AppConfig = {
   enableInternalRoutes: boolean;
   sqlitePath: string;
   auditLogPath: string;
+  telegramBotToken: string | null;
+  telegramPollIntervalMs: number;
 };
 
 const defaultSqlitePath = "~/.local/share/delegate-assistant/data/assistant.db";
@@ -30,8 +32,20 @@ export const loadConfig = (): AppConfig => {
   }
 
   const nodeEnv = process.env.NODE_ENV ?? "development";
+  const telegramPollIntervalMs = Number(
+    process.env.TELEGRAM_POLL_INTERVAL_MS ?? "2000",
+  );
+
+  if (
+    !Number.isInteger(telegramPollIntervalMs) ||
+    telegramPollIntervalMs <= 0
+  ) {
+    throw new Error("TELEGRAM_POLL_INTERVAL_MS must be a positive integer");
+  }
+
   const enableInternalRoutes =
     process.env.ENABLE_INTERNAL_ROUTES === "true" || nodeEnv === "development";
+  const telegramBotToken = process.env.TELEGRAM_BOT_TOKEN?.trim() || null;
 
   return {
     port,
@@ -39,5 +53,7 @@ export const loadConfig = (): AppConfig => {
     enableInternalRoutes,
     sqlitePath: expandHome(process.env.SQLITE_PATH ?? defaultSqlitePath),
     auditLogPath: expandHome(process.env.AUDIT_LOG_PATH ?? defaultAuditPath),
+    telegramBotToken,
+    telegramPollIntervalMs,
   };
 };

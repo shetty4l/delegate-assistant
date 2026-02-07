@@ -2,6 +2,12 @@
 
 Knowledge Index (Johnny Decimal)
 
+## Current v0 Status
+- M1 Foundation Tracer Bullet: complete
+- M2 Telegram Delegation + Planning: complete
+- M3 Policy + Approval Integrity: next
+- CI quality gate is active: `bun run verify`
+
 ## 00-09 Meta
 - `docs/00-09_meta/00-index.md` - master docs index (this file)
 - `docs/00-09_meta/01-doc-conventions.md` - numbering, status, and update rules

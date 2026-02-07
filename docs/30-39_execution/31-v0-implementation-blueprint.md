@@ -4,6 +4,15 @@ Status: active
 
 This document defines the concrete build plan, package layout, and implementation contracts for v0.
 
+## Implementation Notes (Current)
+
+- M1 is implemented as a lean tracer bullet first.
+- HTTP in M1 uses Bun's native server (`Bun.serve`) with Effect orchestration, while preserving ports/adapters boundaries.
+- M1 persistence uses startup schema initialization for core tables (`work_items`, `audit_events`) before introducing a full migration runner.
+- Quality gates are centralized under `bun run verify` and enforced in CI.
+- M2 is implemented with real Telegram long polling and a deterministic `ModelPort.plan` stub; real OpenAI integration is deferred.
+- M2 command behavior: `/status` is active, while `/approve` and `/deny` are explicit placeholders until M3 approval integrity is wired.
+
 ## 1. Monorepo Layout
 
 ```text
