@@ -93,4 +93,34 @@ describe("SqliteWorkItemStore", () => {
     expect(latest?.status).toBe("approved");
     expect(latest?.decisionReason).toBe("APPROVED");
   });
+
+  test("persists generated artifact by work item", async () => {
+    const now = new Date().toISOString();
+    const workItem: WorkItem = {
+      id: "work-item-artifact",
+      traceId: "trace-artifact",
+      status: "triaged",
+      summary: "Generate one file",
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    await store.create(workItem);
+    await store.saveArtifact(
+      workItem.id,
+      {
+        path: "delegate-work-items/work-item-artifact.md",
+        content: "# generated",
+        summary: "Generated artifact summary",
+      },
+      now,
+    );
+
+    const artifact = await store.getArtifactByWorkItemId(workItem.id);
+    expect(artifact).toEqual({
+      path: "delegate-work-items/work-item-artifact.md",
+      content: "# generated",
+      summary: "Generated artifact summary",
+    });
+  });
 });

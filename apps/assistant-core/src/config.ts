@@ -9,6 +9,11 @@ export type AppConfig = {
   auditLogPath: string;
   telegramBotToken: string | null;
   telegramPollIntervalMs: number;
+  modelProvider: "stub" | "opencode_cli";
+  opencodeBin: string;
+  modelName: string;
+  assistantRepoPath: string;
+  githubBaseBranch: string | null;
 };
 
 const defaultSqlitePath = "~/.local/share/delegate-assistant/data/assistant.db";
@@ -46,6 +51,9 @@ export const loadConfig = (): AppConfig => {
   const enableInternalRoutes =
     process.env.ENABLE_INTERNAL_ROUTES === "true" || nodeEnv === "development";
   const telegramBotToken = process.env.TELEGRAM_BOT_TOKEN?.trim() || null;
+  const modelProviderRaw = process.env.MODEL_PROVIDER?.trim() || "stub";
+  const modelProvider =
+    modelProviderRaw === "opencode_cli" ? "opencode_cli" : "stub";
 
   return {
     port,
@@ -55,5 +63,12 @@ export const loadConfig = (): AppConfig => {
     auditLogPath: expandHome(process.env.AUDIT_LOG_PATH ?? defaultAuditPath),
     telegramBotToken,
     telegramPollIntervalMs,
+    modelProvider,
+    opencodeBin: process.env.OPENCODE_BIN?.trim() || "opencode",
+    modelName: process.env.MODEL_NAME?.trim() || "openai/gpt-5.3-codex",
+    assistantRepoPath: expandHome(
+      process.env.ASSISTANT_REPO_PATH ?? process.cwd(),
+    ),
+    githubBaseBranch: process.env.GITHUB_BASE_BRANCH?.trim() || null,
   };
 };

@@ -2,17 +2,22 @@ import type {
   ApprovalRecord,
   AuditEvent,
   ExecutionPlan,
+  ExecutionPlanDraft,
+  GeneratedFileArtifact,
+  GenerateResult,
   InboundMessage,
   PolicyDecision,
   WorkItem,
 } from "@delegate/domain";
 import type {
   ApprovalStore,
+  ArtifactStore,
   AuditPort,
   ChatPort,
   ModelPort,
   PlanStore,
   PolicyEngine,
+  VcsPort,
   WorkItemStore,
 } from "@delegate/ports";
 
@@ -36,8 +41,10 @@ type WorkerDeps = {
   workItemStore: WorkItemStore;
   planStore: PlanStore;
   approvalStore: ApprovalStore;
+  artifactStore: ArtifactStore;
   policyEngine: PolicyEngine;
   auditPort: AuditPort;
+  vcsPort: VcsPort;
 };
 
 type LogFields = Record<string, string | number | boolean | null>;
@@ -80,7 +87,10 @@ const addHours = (iso: string, hours: number): string => {
 const isExpired = (expiryIso: string, now: string): boolean =>
   new Date(expiryIso).getTime() <= new Date(now).getTime();
 
-const approvalPayloadHash = async (plan: ExecutionPlan): Promise<string> => {
+const approvalPayloadHash = async (
+  plan: ExecutionPlan,
+  artifact: GeneratedFileArtifact,
+): Promise<string> => {
   const canonical = JSON.stringify({
     actionType: approvalActionType,
     workItemId: plan.workItemId,
@@ -88,6 +98,10 @@ const approvalPayloadHash = async (plan: ExecutionPlan): Promise<string> => {
     proposedNextStep: plan.proposedNextStep,
     riskLevel: plan.riskLevel,
     sideEffects: [...plan.sideEffects].sort(),
+    artifact: {
+      path: artifact.path,
+      content: artifact.content,
+    },
   });
   return toSha256Hex(canonical);
 };
@@ -126,6 +140,7 @@ const summarize = (text: string): string => {
 const formatPlanResponse = (
   workItem: WorkItem,
   plan: ExecutionPlan,
+  artifact: GeneratedFileArtifact,
   approval: ApprovalRecord | null,
 ): string => {
   const lines = [
@@ -134,6 +149,7 @@ const formatPlanResponse = (
     `Assumptions: ${plan.assumptions.join("; ")}`,
     `Ambiguities: ${plan.ambiguities.join("; ")}`,
     `Next: ${plan.proposedNextStep}`,
+    `Generated file: ${artifact.path}`,
   ];
 
   if (approval) {
@@ -242,6 +258,12 @@ const resolvePlanByApproval = async (
 ): Promise<ExecutionPlan | null> =>
   deps.planStore.getPlanByWorkItemId(approval.workItemId);
 
+const resolveArtifactByApproval = async (
+  deps: WorkerDeps,
+  approval: ApprovalRecord,
+): Promise<GeneratedFileArtifact | null> =>
+  deps.artifactStore.getArtifactByWorkItemId(approval.workItemId);
+
 const handleApproveCommand = async (
   deps: WorkerDeps,
   message: InboundMessage,
@@ -319,7 +341,8 @@ const handleApproveCommand = async (
   }
 
   const plan = await resolvePlanByApproval(deps, approval);
-  if (!plan) {
+  const artifact = await resolveArtifactByApproval(deps, approval);
+  if (!plan || !artifact) {
     await appendApprovalRejectedAudit(deps, approval, "MISMATCH");
     await sendMessage(
       deps.chatPort,
@@ -332,7 +355,7 @@ const handleApproveCommand = async (
     return;
   }
 
-  const hash = await approvalPayloadHash(plan);
+  const hash = await approvalPayloadHash(plan, artifact);
   if (hash !== approval.payloadHash) {
     await appendApprovalRejectedAudit(deps, approval, "MISMATCH");
     await sendMessage(
@@ -375,14 +398,97 @@ const handleApproveCommand = async (
     },
   });
 
-  await sendMessage(
-    deps.chatPort,
-    {
-      chatId: message.chatId,
-      text: `Approval accepted for work item ${approval.workItemId}. Execution remains gated until M4 publish path is implemented.`,
+  await appendAuditEvent(deps.auditPort, {
+    eventId: crypto.randomUUID(),
+    eventType: "execution.started",
+    workItemId: approval.workItemId,
+    actor: "assistant",
+    timestamp: now,
+    traceId,
+    payload: {
+      approvalId: approval.id,
+      actionType: approval.actionType,
+      artifactPath: artifact.path,
     },
-    { command: "approve", approvalId, workItemId: approval.workItemId },
-  );
+  });
+
+  try {
+    const published = await deps.vcsPort.publishPr({
+      workItemId: approval.workItemId,
+      summary: plan.intentSummary,
+      artifact,
+    });
+
+    await appendAuditEvent(deps.auditPort, {
+      eventId: crypto.randomUUID(),
+      eventType: "vcs.pr_published",
+      workItemId: approval.workItemId,
+      actor: "assistant",
+      timestamp: nowIso(),
+      traceId,
+      payload: {
+        branchName: published.branchName,
+        pullRequestUrl: published.pullRequestUrl,
+        artifactPath: artifact.path,
+      },
+    });
+
+    await appendAuditEvent(deps.auditPort, {
+      eventId: crypto.randomUUID(),
+      eventType: "execution.completed",
+      workItemId: approval.workItemId,
+      actor: "assistant",
+      timestamp: nowIso(),
+      traceId,
+      payload: {
+        approvalId: approval.id,
+        actionType: approval.actionType,
+      },
+    });
+
+    await sendMessage(
+      deps.chatPort,
+      {
+        chatId: message.chatId,
+        text: `Approval accepted for work item ${approval.workItemId}. PR published: ${published.pullRequestUrl}`,
+      },
+      { command: "approve", approvalId, workItemId: approval.workItemId },
+    );
+  } catch (error) {
+    const failureAt = nowIso();
+    await deps.workItemStore.updateStatus(
+      approval.workItemId,
+      "cancelled",
+      failureAt,
+    );
+    await appendAuditEvent(deps.auditPort, {
+      eventId: crypto.randomUUID(),
+      eventType: "execution.failed",
+      workItemId: approval.workItemId,
+      actor: "system",
+      timestamp: failureAt,
+      traceId,
+      payload: {
+        approvalId: approval.id,
+        actionType: approval.actionType,
+        error: String(error),
+      },
+    });
+
+    await sendMessage(
+      deps.chatPort,
+      {
+        chatId: message.chatId,
+        text: `Approval accepted, but publish failed for work item ${approval.workItemId}: ${String(error)}`,
+      },
+      {
+        command: "approve",
+        approvalId,
+        workItemId: approval.workItemId,
+        error: String(error),
+      },
+    );
+  }
 };
 
 const handleDenyCommand = async (
@@ -549,10 +655,37 @@ export const handleChatMessage = async (
     },
   });
 
-  const draft = await deps.modelPort.plan({
-    workItemId: workItem.id,
-    text: command.text,
-  });
+  let draft: ExecutionPlanDraft;
+  try {
+    draft = await deps.modelPort.plan({
+      workItemId: workItem.id,
+      text: command.text,
+    });
+  } catch (error) {
+    const failureAt = nowIso();
+    await deps.workItemStore.updateStatus(workItem.id, "cancelled", failureAt);
+    await appendAuditEvent(deps.auditPort, {
+      eventId: crypto.randomUUID(),
+      eventType: "execution.failed",
+      workItemId: workItem.id,
+      actor: "system",
+      timestamp: failureAt,
+      traceId: workItem.traceId,
+      payload: {
+        stage: "plan",
+        error: String(error),
+      },
+    });
+    await sendMessage(
+      deps.chatPort,
+      {
+        chatId: message.chatId,
+        text: `Unable to plan work item ${workItem.id}: ${String(error)}`,
+      },
+      { command: "delegate", workItemId: workItem.id, stage: "plan_failed" },
+    );
+    return;
+  }
   logInfo("plan.drafted", {
     workItemId: workItem.id,
     traceId: workItem.traceId,
@@ -575,6 +708,61 @@ export const handleChatMessage = async (
     ...draft,
   };
 
+  let generated: GenerateResult;
+  try {
+    generated = await deps.modelPort.generate({
+      workItemId: workItem.id,
+      text: command.text,
+      plan: draft,
+    });
+  } catch (error) {
+    const failureAt = nowIso();
+    await deps.workItemStore.updateStatus(workItem.id, "cancelled", failureAt);
+    await appendAuditEvent(deps.auditPort, {
+      eventId: crypto.randomUUID(),
+      eventType: "execution.failed",
+      workItemId: workItem.id,
+      actor: "system",
+      timestamp: failureAt,
+      traceId: workItem.traceId,
+      payload: {
+        stage: "generate",
+        error: String(error),
+      },
+    });
+    await sendMessage(
+      deps.chatPort,
+      {
+        chatId: message.chatId,
+        text: `Unable to generate changes for work item ${workItem.id}: ${String(error)}`,
+      },
+      {
+        command: "delegate",
+        workItemId: workItem.id,
+        stage: "generate_failed",
+      },
+    );
+    return;
+  }
+
+  await deps.artifactStore.saveArtifact(
+    workItem.id,
+    generated.artifact,
+    nowIso(),
+  );
+  await appendAuditEvent(deps.auditPort, {
+    eventId: crypto.randomUUID(),
+    eventType: "artifact.generated",
+    workItemId: workItem.id,
+    actor: "assistant",
+    timestamp: nowIso(),
+    traceId: workItem.traceId,
+    payload: {
+      path: generated.artifact.path,
+      summary: generated.artifact.summary,
+    },
+  });
+
   await deps.planStore.createPlan(plan);
   logInfo("plan.persisted", {
     workItemId: workItem.id,
@@ -591,7 +779,7 @@ export const handleChatMessage = async (
       id: crypto.randomUUID(),
       workItemId: workItem.id,
       actionType: approvalActionType,
-      payloadHash: await approvalPayloadHash(plan),
+      payloadHash: await approvalPayloadHash(plan, generated.artifact),
       status: "pending",
       requestedAt,
       expiresAt: addHours(requestedAt, 24),
@@ -663,6 +851,7 @@ export const handleChatMessage = async (
       text: formatPlanResponse(
         { ...workItem, status: nextStatus, updatedAt: nowIso() },
         plan,
+        generated.artifact,
         approvalRecord,
       ),
     },

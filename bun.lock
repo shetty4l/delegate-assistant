@@ -17,6 +17,8 @@
     "apps/assistant-core": {
       "name": "@delegate/assistant-core",
       "dependencies": {
+        "@delegate/adapters-github": "workspace:*",
+        "@delegate/adapters-model-opencode-cli": "workspace:*",
         "@delegate/adapters-model-stub": "workspace:*",
         "@delegate/adapters-sqlite": "workspace:*",
         "@delegate/adapters-telegram": "workspace:*",
@@ -25,6 +27,20 @@
         "@delegate/policy": "workspace:*",
         "@delegate/ports": "workspace:*",
         "effect": "^3.17.14",
+      },
+    },
+    "packages/adapters-github": {
+      "name": "@delegate/adapters-github",
+      "dependencies": {
+        "@delegate/domain": "workspace:*",
+        "@delegate/ports": "workspace:*",
+      },
+    },
+    "packages/adapters-model-opencode-cli": {
+      "name": "@delegate/adapters-model-opencode-cli",
+      "dependencies": {
+        "@delegate/domain": "workspace:*",
+        "@delegate/ports": "workspace:*",
       },
     },
     "packages/adapters-model-stub": {
@@ -94,6 +110,10 @@
     "@biomejs/cli-win32-arm64": ["@biomejs/cli-win32-arm64@2.3.14", "", { "os": "win32", "cpu": "arm64" }, "sha512-+IKYkj/pUBbnRf1G1+RlyA3LWiDgra1xpS7H2g4BuOzzRbRB+hmlw0yFsLprHhbbt7jUzbzAbAjK/Pn0FDnh1A=="],
 
     "@biomejs/cli-win32-x64": ["@biomejs/cli-win32-x64@2.3.14", "", { "os": "win32", "cpu": "x64" }, "sha512-oizCjdyQ3WJEswpb3Chdngeat56rIdSYK12JI3iI11Mt5T5EXcZ7WLuowzEaFPNJ3zmOQFliMN8QY1Pi+qsfdQ=="],
+
+    "@delegate/adapters-github": ["@delegate/adapters-github@workspace:packages/adapters-github"],
+
+    "@delegate/adapters-model-opencode-cli": ["@delegate/adapters-model-opencode-cli@workspace:packages/adapters-model-opencode-cli"],
 
     "@delegate/adapters-model-stub": ["@delegate/adapters-model-stub@workspace:packages/adapters-model-stub"],
 

@@ -1,3 +1,5 @@
+import { LocalGitHubVcsAdapter } from "@delegate/adapters-github";
+import { OpencodeCliModelAdapter } from "@delegate/adapters-model-opencode-cli";
 import { DeterministicModelStub } from "@delegate/adapters-model-stub";
 import { SqliteWorkItemStore } from "@delegate/adapters-sqlite";
 import { TelegramLongPollingAdapter } from "@delegate/adapters-telegram";
@@ -13,8 +15,19 @@ const config = loadConfig();
 
 const workItemStore = new SqliteWorkItemStore(config.sqlitePath);
 const auditPort = new JsonlAuditPort(config.auditLogPath);
-const modelPort = new DeterministicModelStub();
+const modelPort =
+  config.modelProvider === "opencode_cli"
+    ? new OpencodeCliModelAdapter({
+        binaryPath: config.opencodeBin,
+        model: config.modelName,
+        repoPath: config.assistantRepoPath,
+      })
+    : new DeterministicModelStub();
 const policyEngine = new DefaultPolicyEngine();
+const vcsPort = new LocalGitHubVcsAdapter({
+  repoPath: config.assistantRepoPath,
+  baseBranch: config.githubBaseBranch ?? undefined,
+});
 
 const boot = Effect.gen(function* () {
   yield* Effect.tryPromise({
@@ -46,8 +59,10 @@ const boot = Effect.gen(function* () {
         workItemStore,
         planStore: workItemStore,
         approvalStore: workItemStore,
+        artifactStore: workItemStore,
         policyEngine,
         auditPort,
+        vcsPort,
       },
       config.telegramPollIntervalMs,
     );
@@ -61,6 +76,8 @@ const boot = Effect.gen(function* () {
     auditLogPath: config.auditLogPath,
     internalRoutesEnabled: config.enableInternalRoutes,
     telegramWorkerEnabled: config.telegramBotToken !== null,
+    modelProvider: config.modelProvider,
+    assistantRepoPath: config.assistantRepoPath,
   };
 });
 

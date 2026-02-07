@@ -5,9 +5,13 @@ import type {
   AuditEvent,
   ExecutionPlan,
   ExecutionPlanDraft,
+  GenerateInput,
+  GenerateResult,
   InboundMessage,
   OutboundMessage,
   PolicyDecision,
+  PublishPrInput,
+  PublishPrResult,
   WorkItem,
   WorkItemStatus,
 } from "@delegate/domain";
@@ -66,10 +70,26 @@ export type PlanInput = {
 
 export interface ModelPort {
   plan(input: PlanInput): Promise<ExecutionPlanDraft>;
+  generate(input: GenerateInput): Promise<GenerateResult>;
+}
+
+export interface ArtifactStore {
+  saveArtifact(
+    workItemId: string,
+    artifact: GenerateResult["artifact"],
+    createdAt: string,
+  ): Promise<void>;
+  getArtifactByWorkItemId(
+    workItemId: string,
+  ): Promise<GenerateResult["artifact"] | null>;
 }
 
 export interface PolicyEngine {
   evaluate(plan: ExecutionPlanDraft): Promise<PolicyDecision>;
+}
+
+export interface VcsPort {
+  publishPr(input: PublishPrInput): Promise<PublishPrResult>;
 }
 
 export type ApprovalValidationResult =
