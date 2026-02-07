@@ -10,6 +10,21 @@ Knowledge Index (Johnny Decimal)
 - Minimal ops surface (`/health`, `/ready`): active
 - CI quality gate is active: `bun run verify`
 
+## Active Runtime Surface
+- `apps/assistant-core/src/main.ts`
+- `apps/assistant-core/src/worker.ts`
+- `apps/assistant-core/src/http.ts`
+- `apps/assistant-core/src/opencode-server.ts`
+- `apps/assistant-core/src/session-store.ts`
+- `packages/adapters-telegram/src/index.ts`
+- `packages/adapters-model-opencode-cli/src/index.ts`
+- `packages/domain/src/index.ts`
+- `packages/ports/src/index.ts`
+
+## Legacy Surface
+- Workflow-era packages may remain in repository history but are not part of the active relay runtime path.
+- Canonical execution scope and next milestones are tracked in `docs/30-39_execution/30-v0-working-plan.md`.
+
 ## 00-09 Meta
 - `docs/00-09_meta/00-index.md` - master docs index (this file)
 - `docs/00-09_meta/01-doc-conventions.md` - numbering, status, and update rules
