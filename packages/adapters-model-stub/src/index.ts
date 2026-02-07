@@ -1,4 +1,8 @@
-import type { ExecutionPlanDraft } from "@delegate/domain";
+import type {
+  ExecutionPlanDraft,
+  GenerateInput,
+  GenerateResult,
+} from "@delegate/domain";
 import type { ModelPort, PlanInput } from "@delegate/ports";
 
 const includesAny = (text: string, needles: string[]): boolean =>
@@ -32,6 +36,32 @@ export class DeterministicModelStub implements ModelPort {
         ? ["local_code_changes", "external_publish"]
         : ["local_code_changes"],
       requiresApproval: highRisk,
+    };
+  }
+
+  async generate(input: GenerateInput): Promise<GenerateResult> {
+    const fileName = `delegate-work-items/${input.workItemId}.md`;
+    const sections = [
+      `# Work Item ${input.workItemId}`,
+      "",
+      `Intent: ${input.plan.intentSummary}`,
+      "",
+      "## Requested Task",
+      input.text,
+      "",
+      "## Proposed Next Step",
+      input.plan.proposedNextStep,
+      "",
+      "## Assumptions",
+      ...input.plan.assumptions.map((assumption) => `- ${assumption}`),
+    ];
+
+    return {
+      artifact: {
+        path: fileName,
+        content: sections.join("\n"),
+        summary: "Generated deterministic work item markdown artifact.",
+      },
     };
   }
 }

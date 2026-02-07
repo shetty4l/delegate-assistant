@@ -6,7 +6,7 @@ Knowledge Index (Johnny Decimal)
 - M1 Foundation Tracer Bullet: complete
 - M2 Telegram Delegation + Planning: complete
 - M3 Policy + Approval Integrity: complete
-- M4 Approval-Gated GitHub PR Publish: next
+- M4 Approval-Gated GitHub PR Publish: complete
 - CI quality gate is active: `bun run verify`
 
 ## 00-09 Meta

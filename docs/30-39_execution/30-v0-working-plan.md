@@ -9,7 +9,7 @@ Provide an execution-first plan for delivering v0 in small vertical slices with 
 - M1 Foundation Tracer Bullet: complete
 - M2 Telegram Delegation + Planning: complete
 - M3 Policy + Approval Integrity: complete
-- M4 Approval-Gated GitHub PR Publish: next
+- M4 Approval-Gated GitHub PR Publish: complete
 - M5 Explainability, Recovery, and Test Matrix: not started
 
 ## Non-Goals (v0)
@@ -114,6 +114,12 @@ Template:
 - Decisions:
 - Files changed:
 - Blockers/notes:
+
+2026-02-07
+- Completed: M4 approval-gated PR publish plus model generation integration with `ModelPort.plan` + `ModelPort.generate`, repo-relative single-file artifacts, fail-fast model behavior, GitHub publish adapter (`branch -> commit -> push -> PR`), and Telegram PR URL response on approval.
+- Decisions: Kept implementation lean for personal use (no plugin ecosystem), used `opencode` CLI model adapter without API key, enforced repo-relative generated file paths, chose fail-fast behavior on model errors, and deferred timeouts/retries plus multi-file generation.
+- Files changed: `apps/assistant-core/src/config.ts`, `apps/assistant-core/src/main.ts`, `apps/assistant-core/src/worker.ts`, `apps/assistant-core/src/worker.test.ts`, `apps/assistant-core/package.json`, `packages/domain/src/index.ts`, `packages/ports/src/index.ts`, `packages/adapters-model-stub/src/index.ts`, `packages/adapters-sqlite/src/index.ts`, `packages/adapters-sqlite/src/index.test.ts`, `packages/adapters-model-opencode-cli/package.json`, `packages/adapters-model-opencode-cli/src/index.ts`, `packages/adapters-github/package.json`, `packages/adapters-github/src/index.ts`, `bun.lock`.
+- Blockers/notes: Publish path expects local `git` + `gh` availability and authenticated GitHub CLI session in the configured repository path.
 
 2026-02-07
 - Completed: M3 policy and approval integrity with approval requests, one-time approval consumption, expiry and payload-hash checks, denial terminal behavior, and structured lifecycle logs.

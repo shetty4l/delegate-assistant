@@ -9,6 +9,8 @@
     "test": "bun test"
   },
   "dependencies": {
+    "@delegate/adapters-github": "workspace:*",
+    "@delegate/adapters-model-opencode-cli": "workspace:*",
     "@delegate/adapters-model-stub": "workspace:*",
     "@delegate/adapters-sqlite": "workspace:*",
     "@delegate/adapters-telegram": "workspace:*",

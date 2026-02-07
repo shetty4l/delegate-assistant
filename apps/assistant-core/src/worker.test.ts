@@ -6,14 +6,20 @@ import type {
   AuditEvent,
   ExecutionPlan,
   ExecutionPlanDraft,
+  GeneratedFileArtifact,
+  GenerateInput,
+  GenerateResult,
   InboundMessage,
   OutboundMessage,
   PolicyDecision,
+  PublishPrInput,
+  PublishPrResult,
   WorkItem,
   WorkItemStatus,
 } from "@delegate/domain";
 import type {
   ApprovalStore,
+  ArtifactStore,
   AuditPort,
   ChatPort,
   ChatUpdate,
@@ -21,6 +27,7 @@ import type {
   PlanInput,
   PlanStore,
   PolicyEngine,
+  VcsPort,
   WorkItemStore,
 } from "@delegate/ports";
 
@@ -146,6 +153,24 @@ class InMemoryApprovalStore implements ApprovalStore {
   }
 }
 
+class InMemoryArtifactStore implements ArtifactStore {
+  private readonly artifacts = new Map<string, GeneratedFileArtifact>();
+
+  async saveArtifact(
+    workItemId: string,
+    artifact: GeneratedFileArtifact,
+    _createdAt: string,
+  ): Promise<void> {
+    this.artifacts.set(workItemId, artifact);
+  }
+
+  async getArtifactByWorkItemId(
+    workItemId: string,
+  ): Promise<GeneratedFileArtifact | null> {
+    return this.artifacts.get(workItemId) ?? null;
+  }
+}
+
 class CapturingChatPort implements ChatPort {
   readonly sent: OutboundMessage[] = [];
 
@@ -182,6 +207,22 @@ class HighRiskModelStub implements ModelPort {
       requiresApproval: true,
     };
   }
+
+  async generate(_input: GenerateInput): Promise<GenerateResult> {
+    return {
+      artifact: {
+        path: "delegate-work-items/generated.md",
+        content: "# generated",
+        summary: "Generated test artifact",
+      },
+    };
+  }
+}
+
+class FailingGenerateModelStub extends HighRiskModelStub {
+  override async generate(_input: GenerateInput): Promise<GenerateResult> {
+    throw new Error("simulated generate failure");
+  }
 }
 
 class ApprovalRequiredPolicy implements PolicyEngine {
@@ -193,34 +234,52 @@ class ApprovalRequiredPolicy implements PolicyEngine {
   }
 }
 
+class CapturingVcsPort implements VcsPort {
+  readonly calls: PublishPrInput[] = [];
+
+  async publishPr(input: PublishPrInput): Promise<PublishPrResult> {
+    this.calls.push(input);
+    return {
+      branchName: `assistant/work-item-${input.workItemId.slice(0, 8)}`,
+      pullRequestUrl: "https://github.com/example/repo/pull/123",
+    };
+  }
+}
+
 const inbound = (text: string): InboundMessage => ({
   chatId: "123",
   text,
   receivedAt: new Date().toISOString(),
 });
 
-const setup = () => {
+const setup = (overrides?: { modelPort?: ModelPort }) => {
   const workItemStore = new InMemoryWorkItemStore();
   const planStore = new InMemoryPlanStore();
   const approvalStore = new InMemoryApprovalStore();
+  const artifactStore = new InMemoryArtifactStore();
   const chatPort = new CapturingChatPort();
   const auditPort = new CapturingAuditPort();
+  const vcsPort = new CapturingVcsPort();
 
   return {
     deps: {
       chatPort,
-      modelPort: new HighRiskModelStub(),
+      modelPort: overrides?.modelPort ?? new HighRiskModelStub(),
       workItemStore,
       planStore,
       approvalStore,
+      artifactStore,
       policyEngine: new ApprovalRequiredPolicy(),
       auditPort,
+      vcsPort,
     },
     workItemStore,
     planStore,
     approvalStore,
+    artifactStore,
     chatPort,
     auditPort,
+    vcsPort,
   };
 };
 
@@ -258,10 +317,14 @@ describe("handleChatMessage", () => {
     expect(state.chatPort.sent[0]?.text).toContain(`/approve ${approval?.id}`);
     expect(state.auditPort.events.map((event) => event.eventType)).toEqual([
       "work_item.delegated",
+      "artifact.generated",
       "approval.requested",
       "plan.created",
       "work_item.triaged",
     ]);
+    expect(
+      await state.artifactStore.getArtifactByWorkItemId(items[0]!.id),
+    ).not.toBe(null);
   });
 
   test("returns approval status in status command", async () => {
@@ -290,10 +353,11 @@ describe("handleChatMessage", () => {
     await handleChatMessage(state.deps, inbound(`/approve ${approvalId}`));
     await handleChatMessage(state.deps, inbound(`/approve ${approvalId}`));
 
-    expect(state.chatPort.sent[1]?.text).toContain("Approval accepted");
+    expect(state.chatPort.sent[1]?.text).toContain("PR published");
     expect(state.chatPort.sent[2]?.text).toContain(
       "Approval rejected: REPLAYED",
     );
+    expect(state.vcsPort.calls.length).toBe(1);
   });
 
   test("denies and marks work item denied", async () => {
@@ -343,6 +407,20 @@ describe("handleChatMessage", () => {
     await handleChatMessage(state.deps, inbound(`/approve ${approvalId}`));
     expect(state.chatPort.sent[1]?.text).toContain(
       "Approval rejected: MISMATCH",
+    );
+  });
+
+  test("fails fast when generate fails", async () => {
+    const state = setup({ modelPort: new FailingGenerateModelStub() });
+
+    await handleChatMessage(
+      state.deps,
+      inbound("Please publish a PR for this refactor"),
+    );
+
+    expect(state.workItemStore.all()[0]?.status).toBe("cancelled");
+    expect(state.chatPort.sent[0]?.text).toContain(
+      "Unable to generate changes",
     );
   });
 });

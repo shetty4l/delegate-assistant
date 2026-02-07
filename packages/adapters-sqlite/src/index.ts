@@ -5,10 +5,16 @@ import { dirname } from "node:path";
 import type {
   ApprovalRecord,
   ExecutionPlan,
+  GeneratedFileArtifact,
   PlanSideEffectType,
   WorkItem,
 } from "@delegate/domain";
-import type { ApprovalStore, PlanStore, WorkItemStore } from "@delegate/ports";
+import type {
+  ApprovalStore,
+  ArtifactStore,
+  PlanStore,
+  WorkItemStore,
+} from "@delegate/ports";
 
 type WorkItemRow = {
   id: string;
@@ -44,8 +50,15 @@ type ApprovalRow = {
   decision_reason: string | null;
 };
 
+type ArtifactRow = {
+  work_item_id: string;
+  path: string;
+  content: string;
+  summary: string;
+};
+
 export class SqliteWorkItemStore
-  implements WorkItemStore, PlanStore, ApprovalStore
+  implements WorkItemStore, PlanStore, ApprovalStore, ArtifactStore
 {
   private db: Database | null = null;
 
@@ -105,6 +118,15 @@ export class SqliteWorkItemStore
     db.exec(`
       CREATE INDEX IF NOT EXISTS approvals_work_item_status_idx
       ON approvals(work_item_id, status);
+    `);
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS generated_artifacts (
+        work_item_id TEXT PRIMARY KEY,
+        path TEXT NOT NULL,
+        content TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
     `);
     this.db = db;
   }
@@ -370,6 +392,56 @@ export class SqliteWorkItemStore
         consumed_at: consumedAt,
         decision_reason: decisionReason,
       });
+  }
+
+  async saveArtifact(
+    workItemId: string,
+    artifact: GeneratedFileArtifact,
+    createdAt: string,
+  ): Promise<void> {
+    this.ensureDb()
+      .query(
+        `
+          INSERT INTO generated_artifacts (work_item_id, path, content, summary, created_at)
+          VALUES ($work_item_id, $path, $content, $summary, $created_at)
+          ON CONFLICT(work_item_id) DO UPDATE SET
+            path = excluded.path,
+            content = excluded.content,
+            summary = excluded.summary,
+            created_at = excluded.created_at
+        `,
+      )
+      .run({
+        work_item_id: workItemId,
+        path: artifact.path,
+        content: artifact.content,
+        summary: artifact.summary,
+        created_at: createdAt,
+      });
+  }
+
+  async getArtifactByWorkItemId(
+    workItemId: string,
+  ): Promise<GeneratedFileArtifact | null> {
+    const row = this.ensureDb()
+      .query(
+        `
+          SELECT work_item_id, path, content, summary
+          FROM generated_artifacts
+          WHERE work_item_id = $work_item_id
+        `,
+      )
+      .get({ work_item_id: workItemId }) as ArtifactRow | null;
+
+    if (!row) {
+      return null;
+    }
+
+    return {
+      path: row.path,
+      content: row.content,
+      summary: row.summary,
+    };
   }
 
   private mapApprovalRow(row: ApprovalRow): ApprovalRecord {

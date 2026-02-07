@@ -1,0 +1,12 @@
+{
+  "name": "@delegate/adapters-github",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@delegate/domain": "workspace:*",
+    "@delegate/ports": "workspace:*"
+  }
+}

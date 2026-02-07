@@ -32,6 +32,22 @@ export type ExecutionPlanDraft = {
   requiresApproval: boolean;
 };
 
+export type GeneratedFileArtifact = {
+  path: string;
+  content: string;
+  summary: string;
+};
+
+export type GenerateInput = {
+  workItemId: string;
+  text: string;
+  plan: ExecutionPlanDraft;
+};
+
+export type GenerateResult = {
+  artifact: GeneratedFileArtifact;
+};
+
 export type ExecutionPlan = {
   id: string;
   workItemId: string;
@@ -75,6 +91,17 @@ export type ApprovalRejectReason =
   | "MISMATCH"
   | "ALREADY_DENIED";
 
+export type PublishPrInput = {
+  workItemId: string;
+  summary: string;
+  artifact: GeneratedFileArtifact;
+};
+
+export type PublishPrResult = {
+  branchName: string;
+  pullRequestUrl: string;
+};
+
 export type InboundMessage = {
   chatId: string;
   text: string;
@@ -91,10 +118,15 @@ export type AuditEventType =
   | "work_item.delegated"
   | "work_item.triaged"
   | "plan.created"
+  | "artifact.generated"
   | "approval.requested"
   | "approval.granted"
   | "approval.denied"
-  | "approval.rejected";
+  | "approval.rejected"
+  | "execution.started"
+  | "execution.completed"
+  | "execution.failed"
+  | "vcs.pr_published";
 
 export type AuditEvent = {
   eventId: string;
