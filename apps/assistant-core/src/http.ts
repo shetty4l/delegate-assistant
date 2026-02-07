@@ -1,5 +1,6 @@
 import type { ModelPort } from "@delegate/ports";
 import type { AppConfig } from "./config";
+import { probeOpencodeReachability } from "./opencode-server";
 
 type Deps = {
   config: AppConfig;
@@ -25,7 +26,11 @@ export const startHttpServer = ({
       }
 
       if (request.method === "GET" && url.pathname === "/ready") {
-        const checks = await runReadinessChecks({ sessionStore, modelPort });
+        const checks = await runReadinessChecks({
+          config,
+          sessionStore,
+          modelPort,
+        });
         if (checks.ok) {
           return json({ ok: true, status: "ready" });
         }
@@ -44,14 +49,19 @@ export const startHttpServer = ({
   });
 };
 
-const runReadinessChecks = async ({
+export const runReadinessChecks = async ({
+  config,
   sessionStore,
   modelPort,
+  opencodeProbe,
 }: {
+  config: AppConfig;
   sessionStore: { ping(): Promise<void> };
   modelPort: ModelPort;
+  opencodeProbe?: (attachUrl: string) => Promise<void>;
 }): Promise<{ ok: true } | { ok: false; reasons: string[] }> => {
   const reasons: string[] = [];
+  const probe = opencodeProbe ?? probeOpencodeReachability;
 
   try {
     await sessionStore.ping();
@@ -59,11 +69,23 @@ const runReadinessChecks = async ({
     reasons.push("session_store_unreachable");
   }
 
-  if (modelPort.ping) {
+  if (config.modelProvider === "opencode_cli") {
     try {
-      await modelPort.ping();
+      await probe(config.opencodeAttachUrl);
     } catch {
-      reasons.push("opencode_unavailable");
+      reasons.push("opencode_unreachable");
+    }
+
+    if (reasons.includes("opencode_unreachable")) {
+      return { ok: false, reasons };
+    }
+
+    if (modelPort.ping) {
+      try {
+        await modelPort.ping();
+      } catch {
+        reasons.push("opencode_model_unavailable");
+      }
     }
   }
 
