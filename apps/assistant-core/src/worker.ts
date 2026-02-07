@@ -35,9 +35,18 @@ type WorkerOptions = {
   sessionMaxConcurrent?: number;
   sessionRetryAttempts?: number;
   relayTimeoutMs?: number;
+  progressFirstMs?: number;
+  progressEveryMs?: number;
+  progressMaxCount?: number;
 };
 
 type LogFields = Record<string, string | number | boolean | null>;
+
+type RelayErrorClass =
+  | "session_invalid"
+  | "timeout"
+  | "empty_output"
+  | "transport";
 
 const chatMessageCountByChatId = new Map<string, number>();
 const sessionByKey = new Map<
@@ -87,6 +96,27 @@ const sendMessage = async (
 const buildSessionKey = (message: InboundMessage): string =>
   `${message.chatId}:${message.threadId ?? "root"}`;
 
+const classifyRelayError = (error: unknown): RelayErrorClass => {
+  const text = String(error).toLowerCase();
+  if (text.includes("timed out")) {
+    return "timeout";
+  }
+
+  if (text.includes("no user-facing text output")) {
+    return "empty_output";
+  }
+
+  if (
+    /stale session|invalid session|session .*not found|unknown session|expired session|session rejected/.test(
+      text,
+    )
+  ) {
+    return "session_invalid";
+  }
+
+  return "transport";
+};
+
 const withTimeout = async <T>(
   promise: Promise<T>,
   timeoutMs: number,
@@ -106,6 +136,57 @@ const withTimeout = async <T>(
     if (timer) {
       clearTimeout(timer);
     }
+  }
+};
+
+const runWithProgress = async <T>(input: {
+  task: Promise<T>;
+  onProgress: (count: number) => Promise<void>;
+  firstMs: number;
+  everyMs: number;
+  maxCount: number;
+}): Promise<T> => {
+  const { task, onProgress, firstMs, everyMs, maxCount } = input;
+  let stopped = false;
+  const timers = new Set<ReturnType<typeof setTimeout>>();
+  let count = 0;
+
+  const clearAll = () => {
+    stopped = true;
+    for (const timer of timers) {
+      clearTimeout(timer);
+    }
+    timers.clear();
+  };
+
+  const schedule = (delayMs: number): void => {
+    if (stopped || count >= maxCount) {
+      return;
+    }
+    const timer = setTimeout(async () => {
+      timers.delete(timer);
+      if (stopped || count >= maxCount) {
+        return;
+      }
+      count += 1;
+      try {
+        await onProgress(count);
+      } catch {
+        // non-blocking progress notification failure
+      }
+
+      if (!stopped && count < maxCount) {
+        schedule(everyMs);
+      }
+    }, delayMs);
+    timers.add(timer);
+  };
+
+  schedule(firstMs);
+  try {
+    return await task;
+  } finally {
+    clearAll();
   }
 };
 
@@ -213,7 +294,10 @@ export const handleChatMessage = async (
   const sessionIdleTimeoutMs = options.sessionIdleTimeoutMs ?? 45 * 60 * 1000;
   const sessionMaxConcurrent = options.sessionMaxConcurrent ?? 5;
   const sessionRetryAttempts = options.sessionRetryAttempts ?? 1;
-  const relayTimeoutMs = options.relayTimeoutMs ?? 30_000;
+  const relayTimeoutMs = options.relayTimeoutMs ?? 300_000;
+  const progressFirstMs = options.progressFirstMs ?? 10_000;
+  const progressEveryMs = options.progressEveryMs ?? 30_000;
+  const progressMaxCount = options.progressMaxCount ?? 3;
 
   await evictIdleSessions(deps, sessionIdleTimeoutMs, sessionMaxConcurrent);
 
@@ -257,14 +341,38 @@ export const handleChatMessage = async (
   for (let attempt = 0; attempt <= sessionRetryAttempts; attempt += 1) {
     const attemptedSessionId = sessionId;
     try {
-      const response = await withTimeout(
-        deps.modelPort.respond({
-          ...baseInput,
-          sessionId,
-        }),
-        relayTimeoutMs,
-        "relay turn",
-      );
+      const response = await runWithProgress({
+        task: withTimeout(
+          deps.modelPort.respond({
+            ...baseInput,
+            sessionId,
+          }),
+          relayTimeoutMs,
+          "relay turn",
+        ),
+        onProgress: async (count) => {
+          await sendMessage(
+            deps.chatPort,
+            {
+              chatId: message.chatId,
+              threadId: message.threadId ?? null,
+              text:
+                count === 1
+                  ? "Still working on this request..."
+                  : "Still working... I'll send the result as soon as it's ready.",
+            },
+            {
+              action: "relay",
+              stage: "progress",
+              progressCount: count,
+              sessionKey,
+            },
+          );
+        },
+        firstMs: progressFirstMs,
+        everyMs: progressEveryMs,
+        maxCount: progressMaxCount,
+      });
 
       if (response.sessionId) {
         await persistSessionId(deps, sessionKey, response.sessionId);
@@ -288,17 +396,20 @@ export const handleChatMessage = async (
     } catch (error) {
       lastError = error;
       const errorText = String(error);
-      const isTimeout = /timed out/i.test(errorText);
-      logError(isTimeout ? "relay.timeout" : "relay.error", {
+      const classification = classifyRelayError(error);
+      logError(classification === "timeout" ? "relay.timeout" : "relay.error", {
         chatId: message.chatId,
         sessionKey,
         attempt,
         resumedSession: attemptedSessionId !== null,
+        classification,
         error: errorText,
       });
 
-      sessionId = null;
-      if (attemptedSessionId) {
+      const shouldResetSession =
+        attemptedSessionId !== null && classification === "session_invalid";
+      if (shouldResetSession) {
+        sessionId = null;
         sessionByKey.delete(sessionKey);
         if (deps.sessionStore) {
           await deps.sessionStore.markStale(sessionKey, nowIso());
@@ -310,13 +421,18 @@ export const handleChatMessage = async (
         });
       }
 
-      if (attempt < sessionRetryAttempts) {
+      const shouldRetryFresh =
+        shouldResetSession && attempt < sessionRetryAttempts;
+      if (shouldRetryFresh) {
         logInfo("relay.retry_fresh_session", {
           chatId: message.chatId,
           sessionKey,
           nextAttempt: attempt + 1,
         });
+        continue;
       }
+
+      break;
     }
   }
 

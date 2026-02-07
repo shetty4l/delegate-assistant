@@ -28,7 +28,7 @@ export class OpencodeCliModelAdapter implements ModelPort {
     this.model = options.model ?? "openai/gpt-5.3-codex";
     this.repoPath = options.repoPath ?? process.cwd();
     this.attachUrl = options.attachUrl ?? null;
-    this.responseTimeoutMs = options.responseTimeoutMs ?? 30_000;
+    this.responseTimeoutMs = options.responseTimeoutMs ?? 300_000;
   }
 
   async respond(input: RespondInput): Promise<ModelTurnResponse> {

@@ -13,5 +13,9 @@
   "opencodeServePort": 4096,
   "sessionIdleTimeoutMs": 2700000,
   "sessionMaxConcurrent": 5,
-  "sessionRetryAttempts": 1
+  "sessionRetryAttempts": 1,
+  "relayTimeoutMs": 300000,
+  "progressFirstMs": 10000,
+  "progressEveryMs": 30000,
+  "progressMaxCount": 3
 }
