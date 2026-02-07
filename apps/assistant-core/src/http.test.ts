@@ -21,6 +21,10 @@ const baseConfig = (): AppConfig => ({
   sessionIdleTimeoutMs: 45 * 60 * 1000,
   sessionMaxConcurrent: 5,
   sessionRetryAttempts: 1,
+  relayTimeoutMs: 5 * 60 * 1000,
+  progressFirstMs: 10_000,
+  progressEveryMs: 30_000,
+  progressMaxCount: 3,
 });
 
 describe("runReadinessChecks", () => {

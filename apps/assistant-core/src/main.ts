@@ -21,6 +21,7 @@ const modelPort =
         model: config.modelName,
         repoPath: config.assistantRepoPath,
         attachUrl: config.opencodeAttachUrl,
+        responseTimeoutMs: config.relayTimeoutMs,
       })
     : new DeterministicModelStub();
 
@@ -60,6 +61,10 @@ const boot = async () => {
         sessionIdleTimeoutMs: config.sessionIdleTimeoutMs,
         sessionMaxConcurrent: config.sessionMaxConcurrent,
         sessionRetryAttempts: config.sessionRetryAttempts,
+        relayTimeoutMs: config.relayTimeoutMs,
+        progressFirstMs: config.progressFirstMs,
+        progressEveryMs: config.progressEveryMs,
+        progressMaxCount: config.progressMaxCount,
       },
     );
   } else {
@@ -79,6 +84,10 @@ const boot = async () => {
     sessionIdleTimeoutMs: config.sessionIdleTimeoutMs,
     sessionMaxConcurrent: config.sessionMaxConcurrent,
     sessionRetryAttempts: config.sessionRetryAttempts,
+    relayTimeoutMs: config.relayTimeoutMs,
+    progressFirstMs: config.progressFirstMs,
+    progressEveryMs: config.progressEveryMs,
+    progressMaxCount: config.progressMaxCount,
   };
 };
 

@@ -20,6 +20,10 @@ export type AppConfig = {
   sessionIdleTimeoutMs: number;
   sessionMaxConcurrent: number;
   sessionRetryAttempts: number;
+  relayTimeoutMs: number;
+  progressFirstMs: number;
+  progressEveryMs: number;
+  progressMaxCount: number;
 };
 
 type RawConfigFile = {
@@ -38,6 +42,10 @@ type RawConfigFile = {
   sessionIdleTimeoutMs?: number;
   sessionMaxConcurrent?: number;
   sessionRetryAttempts?: number;
+  relayTimeoutMs?: number;
+  progressFirstMs?: number;
+  progressEveryMs?: number;
+  progressMaxCount?: number;
 };
 
 const defaultConfigPath = "~/.config/delegate-assistant/config.json";
@@ -149,6 +157,10 @@ export const loadConfig = (): AppConfig => {
     "SESSION_IDLE_TIMEOUT_MS",
     "SESSION_MAX_CONCURRENT",
     "SESSION_RETRY_ATTEMPTS",
+    "RELAY_TIMEOUT_MS",
+    "PROGRESS_FIRST_MS",
+    "PROGRESS_EVERY_MS",
+    "PROGRESS_MAX_COUNT",
   ].filter((key) => process.env[key] !== undefined).length;
 
   const port = Number(
@@ -194,6 +206,26 @@ export const loadConfig = (): AppConfig => {
       asOptionalNumber(fileConfig.sessionRetryAttempts) ??
       "1",
   );
+  const relayTimeoutMs = Number(
+    process.env.RELAY_TIMEOUT_MS ??
+      asOptionalNumber(fileConfig.relayTimeoutMs) ??
+      `${5 * 60 * 1000}`,
+  );
+  const progressFirstMs = Number(
+    process.env.PROGRESS_FIRST_MS ??
+      asOptionalNumber(fileConfig.progressFirstMs) ??
+      "10000",
+  );
+  const progressEveryMs = Number(
+    process.env.PROGRESS_EVERY_MS ??
+      asOptionalNumber(fileConfig.progressEveryMs) ??
+      "30000",
+  );
+  const progressMaxCount = Number(
+    process.env.PROGRESS_MAX_COUNT ??
+      asOptionalNumber(fileConfig.progressMaxCount) ??
+      "3",
+  );
 
   const telegramBotToken =
     process.env.TELEGRAM_BOT_TOKEN?.trim() ||
@@ -227,6 +259,10 @@ export const loadConfig = (): AppConfig => {
   asPositiveInt(sessionIdleTimeoutMs, "SESSION_IDLE_TIMEOUT_MS");
   asPositiveInt(sessionMaxConcurrent, "SESSION_MAX_CONCURRENT");
   asPositiveInt(sessionRetryAttempts, "SESSION_RETRY_ATTEMPTS");
+  asPositiveInt(relayTimeoutMs, "RELAY_TIMEOUT_MS");
+  asPositiveInt(progressFirstMs, "PROGRESS_FIRST_MS");
+  asPositiveInt(progressEveryMs, "PROGRESS_EVERY_MS");
+  asPositiveInt(progressMaxCount, "PROGRESS_MAX_COUNT");
 
   return {
     configSourcePath,
@@ -246,5 +282,9 @@ export const loadConfig = (): AppConfig => {
     sessionIdleTimeoutMs,
     sessionMaxConcurrent,
     sessionRetryAttempts,
+    relayTimeoutMs,
+    progressFirstMs,
+    progressEveryMs,
+    progressMaxCount,
   };
 };

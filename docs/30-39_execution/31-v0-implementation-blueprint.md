@@ -26,13 +26,17 @@ Persistence:
 
 Behavior:
 - On message: try persisted/memory session id first
-- If session fails: mark stale, retry once without session id
+- If `session_invalid` occurs: mark stale, retry once without session id
+- If `timeout` or transport errors occur: keep mapping and return a user-visible failure
 - Persist returned `sessionID` from OpenCode JSON events
+- Send progress updates for long-running turns while waiting
 
 Defaults:
 - idle timeout: 45m
 - max concurrent in-memory session hints: 5
 - retry attempts on failed resumed session: 1
+- relay timeout: 5m
+- progress: first at 10s, then every 30s (max 3)
 
 ## 3. OpenCode Server Lifecycle
 
@@ -88,12 +92,17 @@ Required keys:
 - `sessionIdleTimeoutMs`
 - `sessionMaxConcurrent`
 - `sessionRetryAttempts`
+- `relayTimeoutMs`
+- `progressFirstMs`
+- `progressEveryMs`
+- `progressMaxCount`
 
 Optional env overrides:
 - `PORT`, `SQLITE_PATH`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_POLL_INTERVAL_MS`
 - `MODEL_PROVIDER`, `OPENCODE_BIN`, `MODEL_NAME`, `ASSISTANT_REPO_PATH`
 - `OPENCODE_ATTACH_URL`, `OPENCODE_AUTO_START`, `OPENCODE_SERVE_HOST`, `OPENCODE_SERVE_PORT`
 - `SESSION_IDLE_TIMEOUT_MS`, `SESSION_MAX_CONCURRENT`, `SESSION_RETRY_ATTEMPTS`
+- `RELAY_TIMEOUT_MS`, `PROGRESS_FIRST_MS`, `PROGRESS_EVERY_MS`, `PROGRESS_MAX_COUNT`
 
 ## 7. In-Scope Packages
 

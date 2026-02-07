@@ -155,7 +155,7 @@ describe("telegram opencode relay", () => {
     expect(store.staleMarks).toContain("chat-1:root");
   });
 
-  test("times out a hung resumed session and retries fresh session", async () => {
+  test("times out a hung resumed session without staling mapping", async () => {
     const chatPort = new CapturingChatPort();
     const store = new MemorySessionStore();
     await store.upsertSession({
@@ -172,7 +172,7 @@ describe("telegram opencode relay", () => {
       return {
         mode: "chat_reply",
         confidence: 1,
-        replyText: "recovered",
+        replyText: "should-not-be-used",
         sessionId: "ses-new",
       };
     });
@@ -183,8 +183,8 @@ describe("telegram opencode relay", () => {
       { sessionRetryAttempts: 1, relayTimeoutMs: 20 },
     );
 
-    expect(chatPort.sent[0]?.text).toBe("recovered");
-    expect(store.staleMarks).toContain("chat-timeout-retry:root");
+    expect(chatPort.sent[0]?.text).toContain("I couldn't reach OpenCode");
+    expect(store.staleMarks).toEqual([]);
   });
 
   test("sends fallback message after timeout and failed retry", async () => {
@@ -202,5 +202,38 @@ describe("telegram opencode relay", () => {
     );
 
     expect(chatPort.sent[0]?.text).toContain("I couldn't reach OpenCode");
+  });
+
+  test("sends progress updates for long-running turns", async () => {
+    const chatPort = new CapturingChatPort();
+    const store = new MemorySessionStore();
+    const model = new ScriptedModel(
+      async () =>
+        await new Promise<ModelTurnResponse>((resolve) => {
+          setTimeout(() => {
+            resolve({
+              mode: "chat_reply",
+              confidence: 1,
+              replyText: "done",
+              sessionId: "ses-long",
+            });
+          }, 30);
+        }),
+    );
+
+    await handleChatMessage(
+      { chatPort, modelPort: model, sessionStore: store },
+      inbound("analyze this", null, "chat-progress"),
+      {
+        relayTimeoutMs: 200,
+        progressFirstMs: 5,
+        progressEveryMs: 100,
+        progressMaxCount: 1,
+      },
+    );
+
+    expect(chatPort.sent.length).toBe(2);
+    expect(chatPort.sent[0]?.text).toContain("Still working");
+    expect(chatPort.sent[1]?.text).toBe("done");
   });
 });
