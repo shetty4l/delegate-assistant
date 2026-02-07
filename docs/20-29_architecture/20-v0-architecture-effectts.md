@@ -14,6 +14,7 @@ Core behaviors:
 - Block externally visible side effects until explicit approval.
 - Execute approved actions and report outcomes.
 - Keep immutable auditability across the full lifecycle.
+- Keep chat language-first with concise responses and minimal required slash commands.
 
 ## 2. System Goals for v0
 
@@ -28,6 +29,7 @@ Out of scope for v0:
 - Autonomous monitoring loops.
 - Automatic merges.
 - Multi-user tenancy.
+- Fixed reminder/scheduling UX design (behavior should emerge through collaboration, not hardcoded flows).
 
 ## 3. Architectural Style
 
@@ -129,6 +131,11 @@ Required services:
   - CRUD + transition primitives guarded by state machine checks.
 - `SecretPort`
   - `get(name: SecretName): Effect<SecretValue, SecretError>`
+- `MemoryPort`
+  - `health(): Effect<MemoryHealth, MemoryError>`
+  - `recall(input): Effect<MemoryRecallResult, MemoryError>`
+  - `remember(input): Effect<MemoryRememberResult, MemoryError>`
+  - `forget(input): Effect<MemoryForgetResult, MemoryError>`
 
 Implementation note:
 - Keep adapter errors strongly typed and map them to domain-level errors at orchestration boundary.
@@ -137,11 +144,12 @@ Implementation note:
 
 Initial adapters:
 - `TelegramChatAdapter` (long polling).
-- `GitHubAdapter` (assistant-account fine-grained PAT).
-- `OpenAIModelAdapter` (initial provider).
+- `GitHubAdapter` (local `git` + `gh` CLI in assistant repo path).
+- `OpencodeCliModelAdapter` (default model provider for v0 runtime).
 - `SQLiteStoreAdapter`.
 - `JsonlAuditAdapter`.
 - `EnvSecretAdapter`.
+- `EngramMemoryAdapter` (local HTTP service).
 
 Future adapters should only require wiring a new `Layer`, not domain rewrites.
 
@@ -164,7 +172,7 @@ Flow:
 2. Planner produces executable plan.
 3. Builder generates changes.
 4. Local checks run.
-5. User receives concise approval request with risk and side effects.
+5. User receives concise approval request with risk, side effects, and `Approve / Revise / Deny` actions.
 6. On approval, publish branch and PR.
 7. Return PR URL to chat.
 8. Persist full audit chain.
@@ -202,11 +210,12 @@ Consistency rule:
 ## 14. Security Baseline
 
 Required controls:
-- Fine-grained GitHub PAT scoped to assistant account and explicit repos.
+- GitHub CLI authentication scoped to assistant account and explicit repos.
 - Telegram bot token scoped to bot only.
-- OpenAI key with least privilege and monitored usage.
+- Local model execution via `opencode` binary (or provider-specific key only when explicitly configured later).
 - Redaction of secrets/tokens before logging.
 - No secrets in git, chat memory, or persistent prompt artifacts.
+- Memory outages are surfaced to the user with rate limiting to avoid chat spam.
 
 ## 15. Observability and Explainability
 
@@ -228,3 +237,4 @@ Planned increments after v0:
 - Replace in-process worker with queue/workflow runtime when needed.
 - Move from PAT to GitHub App for improved auth posture.
 - Add model routing and provider failover behind `ModelPort`.
+- Add richer reminder/scheduling capabilities after conversation-first UX and adaptive memory are stable.

@@ -76,10 +76,7 @@ export class LocalGitHubVcsAdapter implements VcsPort {
         switchedToBase = true;
       }
 
-      await this.runOrThrow(
-        ["git", "checkout", "-b", branchName],
-        "create branch",
-      );
+      await this.checkoutOrCreateBranch(branchName);
 
       const absolutePath = assertRepoRelativePath(
         this.repoPath,
@@ -92,33 +89,30 @@ export class LocalGitHubVcsAdapter implements VcsPort {
         ["git", "add", input.artifact.path],
         "stage generated artifact",
       );
-      await this.runOrThrow(
-        ["git", "commit", "-m", title],
-        "commit generated artifact",
-      );
+
+      const hasStagedChanges = await this.hasStagedChanges();
+      if (hasStagedChanges) {
+        await this.runOrThrow(
+          ["git", "commit", "-m", title],
+          "commit generated artifact",
+        );
+      }
+
       await this.runOrThrow(
         ["git", "push", "-u", "origin", branchName],
         "push assistant branch",
       );
 
-      const prCreate = await this.runOrThrow(
-        [
-          "gh",
-          "pr",
-          "create",
-          "--base",
+      const existingPrUrl = await this.findExistingPrUrl(branchName);
+      const pullRequestUrl =
+        existingPrUrl ??
+        (await this.createPullRequest({
           baseBranch,
-          "--head",
           branchName,
-          "--title",
           title,
-          "--body",
           body,
-        ],
-        "create pull request",
-      );
+        }));
 
-      const pullRequestUrl = this.extractPrUrl(prCreate.stdout);
       return {
         branchName,
         pullRequestUrl,
@@ -148,6 +142,80 @@ export class LocalGitHubVcsAdapter implements VcsPort {
       );
     }
     return line;
+  }
+
+  private async checkoutOrCreateBranch(branchName: string): Promise<void> {
+    const existing = await this.run([
+      "git",
+      "rev-parse",
+      "--verify",
+      branchName,
+    ]);
+    if (existing.exitCode === 0) {
+      await this.runOrThrow(["git", "checkout", branchName], "checkout branch");
+      return;
+    }
+
+    await this.runOrThrow(
+      ["git", "checkout", "-b", branchName],
+      "create branch",
+    );
+  }
+
+  private async hasStagedChanges(): Promise<boolean> {
+    const result = await this.run(["git", "diff", "--cached", "--quiet"]);
+    return result.exitCode === 1;
+  }
+
+  private async createPullRequest(input: {
+    baseBranch: string;
+    branchName: string;
+    title: string;
+    body: string;
+  }): Promise<string> {
+    const prCreate = await this.runOrThrow(
+      [
+        "gh",
+        "pr",
+        "create",
+        "--base",
+        input.baseBranch,
+        "--head",
+        input.branchName,
+        "--title",
+        input.title,
+        "--body",
+        input.body,
+      ],
+      "create pull request",
+    );
+    return this.extractPrUrl(prCreate.stdout);
+  }
+
+  private async findExistingPrUrl(branchName: string): Promise<string | null> {
+    const result = await this.run([
+      "gh",
+      "pr",
+      "list",
+      "--head",
+      branchName,
+      "--json",
+      "url",
+      "--limit",
+      "1",
+    ]);
+
+    if (result.exitCode !== 0) {
+      return null;
+    }
+
+    try {
+      const parsed = JSON.parse(result.stdout) as Array<{ url?: string }>;
+      const url = parsed[0]?.url;
+      return typeof url === "string" && url.length > 0 ? url : null;
+    } catch {
+      return null;
+    }
   }
 
   private async runOrThrow(cmd: string[], step: string): Promise<RunResult> {

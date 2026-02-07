@@ -7,6 +7,9 @@ Knowledge Index (Johnny Decimal)
 - M2 Telegram Delegation + Planning: complete
 - M3 Policy + Approval Integrity: complete
 - M4 Approval-Gated GitHub PR Publish: complete
+- M5 Explainability, Recovery, and Test Matrix: not started
+- M6 Conversation-First UX Bootstrap: planned
+- M7 Adaptive Memory via Engram: planned
 - CI quality gate is active: `bun run verify`
 
 ## 00-09 Meta

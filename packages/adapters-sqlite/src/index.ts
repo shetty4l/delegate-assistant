@@ -370,6 +370,30 @@ export class SqliteWorkItemStore
     return row ? this.mapApprovalRow(row) : null;
   }
 
+  async listPendingApprovals(): Promise<ApprovalRecord[]> {
+    const rows = this.ensureDb()
+      .query(
+        `
+          SELECT
+            id,
+            work_item_id,
+            action_type,
+            payload_hash,
+            status,
+            requested_at,
+            expires_at,
+            consumed_at,
+            decision_reason
+          FROM approvals
+          WHERE status = 'pending'
+          ORDER BY requested_at ASC
+        `,
+      )
+      .all() as ApprovalRow[];
+
+    return rows.map((row) => this.mapApprovalRow(row));
+  }
+
   async updateApprovalStatus(
     approvalId: string,
     status: ApprovalRecord["status"],

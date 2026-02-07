@@ -11,17 +11,24 @@ Provide an execution-first plan for delivering v0 in small vertical slices with 
 - M3 Policy + Approval Integrity: complete
 - M4 Approval-Gated GitHub PR Publish: complete
 - M5 Explainability, Recovery, and Test Matrix: not started
+- M6 Conversation-First UX Bootstrap: planned
+- M7 Adaptive Memory via Engram: planned
 
 ## Non-Goals (v0)
 - Autonomous monitoring loops
 - Automatic email sending
 - Automatic merges
 - Multi-user tenancy
+- Reminder/scheduling UX design lock-in (deferred to emerge via conversation)
 
 ## Locked Decisions
 - Package manager/runtime: `bun`
 - Primary interface: Telegram long polling
-- v0 command UX: text commands (`/approve`, `/deny`, `/status`, `/explain`)
+- UX principle: language-first, commands-last (slash commands remain fallback)
+- Approval UX contract: always render `Approve / Revise / Deny`
+- Context-bound natural confirmations (for example, "go ahead") are valid only when an approval is actively pending
+- Memory namespace: global
+- Engram integration mode: external local service (no auth) with surfaced, rate-limited outage notices
 - `CRITICAL` actions require additional high-signal confirmation phrase
 - PR publish tracer bullet starts with minimal single-file patch path
 
@@ -80,11 +87,40 @@ Scope:
 - `/explain <workItemId>` timeline/rationale output
 - Startup recovery for in-flight work items
 - Unit, contract, integration, and security tests
+- Publish-path reconciliation to avoid false-negative "publish failed" status after successful PR creation
 
 Exit criteria:
 - Explain output answers why/what/alternatives
 - Safe resume behavior validated
 - Required checks pass (typecheck, test, lint)
+
+### M6 - Conversation-First UX Bootstrap
+Scope:
+- Natural-language-first intent routing (`plan`, `execute`, `approve`, `deny`, `revise`, `status`, `details`) with slash commands as fallback
+- Compact Telegram response composer (short default, expanded details on demand)
+- Explicit approval prompt contract with `Approve / Revise / Deny`
+- Freeform revise loop for plan/payload updates before execution
+- Context-bound approval phrase handling and improved status clarity
+
+Exit criteria:
+- Typical delegation and approval flows work without requiring slash commands
+- Telegram responses are concise by default and avoid boilerplate dumps
+- `Revise` supports freeform text and updates the proposed execution payload before approval
+- Natural "go ahead" only succeeds when tied to the currently pending approval
+
+### M7 - Adaptive Memory via Engram
+Scope:
+- External `MemoryPort` adapter to local Engram HTTP service (`/health`, `/recall`, `/remember`, `/forget`)
+- Recall-before-plan context injection to personalize collaboration
+- High-confidence-only remember writes
+- Forget-by-phrase orchestration (`recall -> resolve memory id -> forget`)
+- Surfaced but rate-limited memory outage messaging in Telegram
+
+Exit criteria:
+- Memory recall influences planning/generation context in normal conversation paths
+- Forget intent works from natural language with disambiguation when needed
+- Memory writes are gated by confidence thresholds and category allow-list
+- Assistant continues operating when memory service is unavailable and reports degraded memory status without chat spam
 
 ## Risk Register
 - External API drift (Telegram/GitHub): isolate in adapters and add contract tests
@@ -114,6 +150,12 @@ Template:
 - Decisions:
 - Files changed:
 - Blockers/notes:
+
+2026-02-07
+- Completed: Updated roadmap to separate original M5 scope from new M6 conversation-first bootstrap and M7 adaptive memory milestones.
+- Decisions: Locked language-first UX, fixed approval CTA contract (`Approve / Revise / Deny`), selected global memory namespace, selected external local Engram integration with surfaced rate-limited outage notices, and deferred reminder design lock-in.
+- Files changed: `docs/00-09_meta/00-index.md`, `docs/10-19_product/10-v0-requirements.md`, `docs/20-29_architecture/20-v0-architecture-effectts.md`, `docs/30-39_execution/30-v0-working-plan.md`, `docs/30-39_execution/31-v0-implementation-blueprint.md`.
+- Blockers/notes: M7 depends on wiring `MemoryPort` + Engram adapter and forget-by-id orchestration in assistant runtime.
 
 2026-02-07
 - Completed: M4 approval-gated PR publish plus model generation integration with `ModelPort.plan` + `ModelPort.generate`, repo-relative single-file artifacts, fail-fast model behavior, GitHub publish adapter (`branch -> commit -> push -> PR`), and Telegram PR URL response on approval.

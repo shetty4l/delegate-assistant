@@ -9,7 +9,7 @@ import { Effect } from "effect";
 
 import { loadConfig } from "./config";
 import { startHttpServer } from "./http";
-import { startTelegramWorker } from "./worker";
+import { recoverInFlightWorkItems, startTelegramWorker } from "./worker";
 
 const config = loadConfig();
 
@@ -40,6 +40,17 @@ const boot = Effect.gen(function* () {
     try: () => auditPort.init(),
     catch: (cause) =>
       new Error(`Failed to initialize audit writer: ${String(cause)}`),
+  });
+
+  const recovery = yield* Effect.tryPromise({
+    try: () =>
+      recoverInFlightWorkItems({
+        approvalStore: workItemStore,
+        workItemStore,
+        auditPort,
+      }),
+    catch: (cause) =>
+      new Error(`Failed to recover in-flight work items: ${String(cause)}`),
   });
 
   startHttpServer({
@@ -78,6 +89,7 @@ const boot = Effect.gen(function* () {
     telegramWorkerEnabled: config.telegramBotToken !== null,
     modelProvider: config.modelProvider,
     assistantRepoPath: config.assistantRepoPath,
+    recovery,
   };
 });
 

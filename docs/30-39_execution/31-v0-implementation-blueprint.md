@@ -14,6 +14,8 @@ This document defines the concrete build plan, package layout, and implementatio
 - M2 command behavior: `/status` is active, while `/approve` and `/deny` are explicit placeholders until M3 approval integrity is wired.
 - M3 implements policy decisions plus approval integrity checks (one-time consumption, expiry, payload-hash validation) with auditable approval events.
 - M3 adds structured JSON lifecycle logs to stdout for live operator visibility with correlation IDs.
+- M4 is implemented with `ModelPort.plan` + `ModelPort.generate`, generated artifact persistence, approval hash binding, and local GitHub publish (`git` + `gh`) behind approval.
+- Next milestones split into M5 (explain/recovery/test matrix), M6 (conversation-first UX bootstrap), and M7 (adaptive memory via Engram).
 
 ## 1. Monorepo Layout
 
@@ -34,8 +36,9 @@ This document defines the concrete build plan, package layout, and implementatio
 │   ├── audit/
 │   ├── adapters-telegram/
 │   ├── adapters-github/
-│   ├── adapters-model-openai/
+│   ├── adapters-model-opencode-cli/
 │   ├── adapters-sqlite/
+│   ├── adapters-memory-engram/
 │   └── adapters-secrets-env/
 ├── docs/
 └── bun-workspace.toml
@@ -65,7 +68,7 @@ Deliverable:
 - User can send Telegram request and receive a structured plan + approval prompt.
 
 ### Day 3: PR Publish Flow
-- Implement GitHub adapter (PAT-based).
+- Implement GitHub adapter (local `git` + `gh` CLI flow).
 - Implement approval token creation/consumption.
 - Wire `publishPr` execution path behind approval gate.
 - Post PR URL back to Telegram.
@@ -97,12 +100,12 @@ Required event types:
 - `work_item.delegated`
 - `work_item.triaged`
 - `plan.created`
-- `action.proposed`
+- `artifact.generated`
 - `approval.requested`
 - `approval.granted`
 - `approval.denied`
+- `approval.rejected`
 - `execution.started`
-- `execution.step_completed`
 - `execution.completed`
 - `execution.failed`
 - `vcs.pr_published`
@@ -172,16 +175,15 @@ Prompting constraints:
 ## 8. Telegram Adapter Behavior
 
 Inbound parsing:
-- Plain text maps to new work item.
-- `/approve <approvalId>` consumes approval.
-- `/deny <approvalId>` marks denied.
-- `/status <workItemId>` returns current state.
-- `/explain <workItemId>` renders replay summary.
+- Plain text is primary interaction surface and should support collaborative planning + revision.
+- Natural approvals/denials/revisions are context-bound to active approval prompts.
+- Slash commands remain available as fallback (`/approve`, `/deny`, `/status`, `/explain`).
 
 Outbound style:
 - concise summary
 - explicit next step
-- if approval is needed, include action, risk, side effects, expiry
+- if approval is needed, include action, risk, side effects, expiry, and `Approve / Revise / Deny`
+- expose full details only on demand (`details`/`verbose` style responses)
 
 ## 9. GitHub Adapter Behavior
 
@@ -192,13 +194,13 @@ v0 capabilities:
 - create PR
 
 Required metadata:
-- assistant identity author/committer
 - link back to `workItemId` in PR body
-- include checklist with tests run and known limitations
+- include checks/limitations summary in PR body where available
 
 Failure handling:
 - map API/git failures to typed `VcsError`.
 - persist retry-eligible vs non-retry-eligible classification.
+- reconcile idempotent outcomes (if PR already exists for branch and diff matches, report success rather than false failure).
 
 ## 10. SQLite Schema v0
 
@@ -209,6 +211,7 @@ Minimum table set:
 - `executions`
 - `audit_events`
 - `messages`
+- `generated_artifacts`
 
 Recommended indexes:
 - `work_items(status, updated_at)`
@@ -251,18 +254,36 @@ Security tests:
 
 Environment variables:
 - `TELEGRAM_BOT_TOKEN`
-- `GITHUB_TOKEN` (fine-grained PAT)
-- `OPENAI_API_KEY`
 - `SQLITE_PATH`
 - `AUDIT_LOG_PATH`
-- `ASSISTANT_GITHUB_OWNER`
-- `ASSISTANT_GITHUB_REPO`
+- `MODEL_PROVIDER` (`stub` | `opencode_cli`)
+- `OPENCODE_BIN`
+- `MODEL_NAME`
+- `ASSISTANT_REPO_PATH`
+- `GITHUB_BASE_BRANCH`
+- `MEMORY_PROVIDER` (planned for M7)
+- `ENGRAM_BASE_URL` (planned for M7)
+- `ENGRAM_TIMEOUT_MS` (planned for M7)
 
 Guidelines:
 - validate env at boot with typed schema.
 - fail fast on missing required values.
 
-## 14. Review Gates Before Coding
+## 14. M6 + M7 Interaction Contracts
+
+M6 conversation bootstrap:
+- language-first intent router with command fallback
+- compact response composer by default
+- freeform revise loop before execution
+- context-bound natural approval phrases
+
+M7 adaptive memory:
+- recall context before plan/generate
+- remember only high-confidence preference/pattern/fact/decision/insight candidates
+- forget-by-phrase orchestration: `recall -> resolve id -> forget`
+- memory outage handling is surfaced to users and rate-limited
+
+## 15. Review Gates Before Coding
 
 Before implementation starts, confirm:
 - event schema naming and stability expectations.
