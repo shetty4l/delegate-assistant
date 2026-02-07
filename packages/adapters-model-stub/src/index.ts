@@ -2,13 +2,54 @@ import type {
   ExecutionPlanDraft,
   GenerateInput,
   GenerateResult,
+  ModelTurnResponse,
 } from "@delegate/domain";
-import type { ModelPort, PlanInput } from "@delegate/ports";
+import type { ModelPort, PlanInput, RespondInput } from "@delegate/ports";
 
 const includesAny = (text: string, needles: string[]): boolean =>
   needles.some((needle) => text.includes(needle));
 
 export class DeterministicModelStub implements ModelPort {
+  async respond(input: RespondInput): Promise<ModelTurnResponse> {
+    const normalized = input.text.toLowerCase();
+    const highRisk = includesAny(normalized, [
+      "publish",
+      "pr",
+      "merge",
+      "deploy",
+      "delete",
+      "send",
+      "open a pull request",
+      "open pr",
+    ]);
+
+    if (!highRisk) {
+      return {
+        mode: "chat_reply",
+        confidence: 0.2,
+        replyText: "Doing well - what should we work on next?",
+      };
+    }
+
+    const plan = await this.plan({
+      workItemId: "draft",
+      text: input.text,
+    });
+    const generated = await this.generate({
+      workItemId: crypto.randomUUID(),
+      text: input.text,
+      plan,
+    });
+
+    return {
+      mode: "execution_proposal",
+      confidence: 0.9,
+      replyText: "I can make this change and open a PR.",
+      plan,
+      artifact: generated.artifact,
+    };
+  }
+
   async plan(input: PlanInput): Promise<ExecutionPlanDraft> {
     const normalized = input.text.toLowerCase();
 

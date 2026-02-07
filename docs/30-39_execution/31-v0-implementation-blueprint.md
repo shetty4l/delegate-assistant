@@ -175,9 +175,11 @@ Prompting constraints:
 ## 8. Telegram Adapter Behavior
 
 Inbound parsing:
-- Plain text is primary interaction surface and should support collaborative planning + revision.
+- Plain text is the primary interaction surface and runs through conversation-first model response.
+- `/start` is honored only as the first message in a chat; later `/start` messages are ignored.
 - Natural approvals/denials/revisions are context-bound to active approval prompts.
-- Slash commands remain available as fallback (`/approve`, `/deny`, `/status`, `/explain`).
+- Natural approval/denial phrases use a strict allow-list in M6 and require clarification when no pending proposal exists.
+- All other slash-prefixed text is treated as normal chat input.
 
 Outbound style:
 - concise summary
@@ -252,30 +254,45 @@ Security tests:
 
 ## 13. Initial Config Surface
 
-Environment variables:
-- `TELEGRAM_BOT_TOKEN`
-- `SQLITE_PATH`
-- `AUDIT_LOG_PATH`
-- `MODEL_PROVIDER` (`stub` | `opencode_cli`)
-- `OPENCODE_BIN`
-- `MODEL_NAME`
-- `ASSISTANT_REPO_PATH`
-- `GITHUB_BASE_BRANCH`
-- `MEMORY_PROVIDER` (planned for M7)
-- `ENGRAM_BASE_URL` (planned for M7)
-- `ENGRAM_TIMEOUT_MS` (planned for M7)
+Primary config source:
+- JSON file path: `DELEGATE_CONFIG_PATH` or default `~/.config/delegate-assistant/config.json`
+- Missing/invalid file fails boot immediately with a clear error
 
-Guidelines:
-- validate env at boot with typed schema.
-- fail fast on missing required values.
+JSON keys:
+- `port`
+- `nodeEnv`
+- `enableInternalRoutes`
+- `sqlitePath`
+- `auditLogPath`
+- `telegramBotToken`
+- `telegramPollIntervalMs`
+- `modelProvider` (`stub` | `opencode_cli`)
+- `opencodeBin`
+- `modelName`
+- `assistantRepoPath`
+- `githubBaseBranch`
+- `executionIntentConfidenceThreshold` (`0..1`)
+- `previewDiffFirst` (`true|false`)
+
+Environment overrides (optional, higher precedence):
+- `PORT`, `NODE_ENV`, `ENABLE_INTERNAL_ROUTES`
+- `SQLITE_PATH`, `AUDIT_LOG_PATH`
+- `TELEGRAM_BOT_TOKEN`, `TELEGRAM_POLL_INTERVAL_MS`
+- `MODEL_PROVIDER`, `OPENCODE_BIN`, `MODEL_NAME`
+- `ASSISTANT_REPO_PATH`, `GITHUB_BASE_BRANCH`
+- `EXECUTION_INTENT_CONFIDENCE_THRESHOLD`
+- `PREVIEW_DIFF_FIRST`
 
 ## 14. M6 + M7 Interaction Contracts
 
 M6 conversation bootstrap:
-- language-first intent router with command fallback
+- conversation-first chat loop with model-inferred execution proposals
 - compact response composer by default
-- freeform revise loop before execution
-- context-bound natural approval phrases
+- freeform revise loop regenerating proposal plan and artifact before execution
+- context-bound natural approval/denial phrases from a strict allow-list
+- no slash commands except first-message `/start`
+- execution proposal is accepted only when confidence >= configured threshold
+- strict starter phrases: approve (`approve`, `go ahead`, `yes, approve`, `ship it`) and deny (`deny`, `no, deny`, `stop this`, `do not proceed`)
 
 M7 adaptive memory:
 - recall context before plan/generate
@@ -287,7 +304,7 @@ M7 adaptive memory:
 
 Before implementation starts, confirm:
 - event schema naming and stability expectations.
-- command syntax for approval/deny/status in Telegram.
+- confidence threshold for execution proposal promotion in Telegram.
 - PR body template and required metadata.
 - sensitive path list for `CRITICAL` classification.
 
