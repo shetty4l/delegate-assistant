@@ -1,0 +1,10 @@
+Commit message:
+implement m6 structured model response contract and config-driven runtime
+
+Execution sequence:
+1) git status
+2) git diff --staged && git diff
+3) git add <intended files>
+4) git commit -m "implement m6 structured model response contract and config-driven runtime"
+5) git push -u origin <current-branch>
+6) gh pr create --title "implement m6 structured model response contract and config-driven runtime" --body "## Summary\n- Add structured model response contract support across domain, ports, adapters, and runtime wiring\n- Introduce config-driven runtime controls and update worker behavior/tests\n- Document requirements, plan, and implementation blueprint updates"
