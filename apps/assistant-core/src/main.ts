@@ -14,9 +14,204 @@ import { startTelegramWorker } from "./worker";
 
 const RESTART_EXIT_CODE = 75;
 const WORKER_ROLE = "worker";
+const PORT_RECLAIM_TERM_TIMEOUT_MS = 4_000;
+const PORT_RECLAIM_KILL_TIMEOUT_MS = 1_500;
+const PORT_RECLAIM_POLL_INTERVAL_MS = 100;
 
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
+
+const isAddressInUseError = (error: unknown): boolean => {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  return (error as { code?: unknown }).code === "EADDRINUSE";
+};
+
+const parsePidList = (raw: string): number[] => {
+  const unique = new Set<number>();
+  for (const line of raw.split("\n")) {
+    const parsed = Number.parseInt(line.trim(), 10);
+    if (Number.isInteger(parsed) && parsed > 0) {
+      unique.add(parsed);
+    }
+  }
+  return [...unique];
+};
+
+type ReclaimPortDeps = {
+  findListeningPids: (port: number) => number[];
+  signalPid: (pid: number, signal: NodeJS.Signals) => void;
+  isAlive: (pid: number) => boolean;
+  wait: (ms: number) => Promise<void>;
+  currentPid: number;
+};
+
+const defaultReclaimPortDeps = (): ReclaimPortDeps => ({
+  findListeningPids: (port: number) => {
+    const result = Bun.spawnSync({
+      cmd: ["lsof", "-nP", `-iTCP:${String(port)}`, "-sTCP:LISTEN", "-t"],
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    if (result.exitCode !== 0) {
+      return [];
+    }
+
+    return parsePidList(new TextDecoder().decode(result.stdout));
+  },
+  signalPid: (pid: number, signal: NodeJS.Signals) => {
+    process.kill(pid, signal);
+  },
+  isAlive: (pid: number) => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  },
+  wait: sleep,
+  currentPid: process.pid,
+});
+
+const waitForPidsToExit = async (
+  pids: number[],
+  timeoutMs: number,
+  deps: Pick<ReclaimPortDeps, "isAlive" | "wait">,
+): Promise<number[]> => {
+  const startedAt = Date.now();
+  let pending = pids.filter((pid) => deps.isAlive(pid));
+
+  while (pending.length > 0 && Date.now() - startedAt < timeoutMs) {
+    await deps.wait(PORT_RECLAIM_POLL_INTERVAL_MS);
+    pending = pending.filter((pid) => deps.isAlive(pid));
+  }
+
+  return pending;
+};
+
+export const reclaimPortFromPriorAssistant = async (
+  port: number,
+  deps: ReclaimPortDeps = defaultReclaimPortDeps(),
+): Promise<{ ok: boolean; pids: number[]; forcedPids: number[] }> => {
+  const listeningPids = deps
+    .findListeningPids(port)
+    .filter((pid) => pid !== deps.currentPid);
+
+  if (listeningPids.length === 0) {
+    return { ok: false, pids: [], forcedPids: [] };
+  }
+
+  for (const pid of listeningPids) {
+    try {
+      deps.signalPid(pid, "SIGTERM");
+    } catch {
+      // process already gone or no permission; verify later via isAlive
+    }
+  }
+
+  let survivors = await waitForPidsToExit(
+    listeningPids,
+    PORT_RECLAIM_TERM_TIMEOUT_MS,
+    deps,
+  );
+  const forcedPids: number[] = [];
+
+  if (survivors.length > 0) {
+    for (const pid of survivors) {
+      try {
+        deps.signalPid(pid, "SIGKILL");
+        forcedPids.push(pid);
+      } catch {
+        // process already gone or no permission; verify later via isAlive
+      }
+    }
+
+    survivors = await waitForPidsToExit(
+      survivors,
+      PORT_RECLAIM_KILL_TIMEOUT_MS,
+      deps,
+    );
+  }
+
+  return {
+    ok: survivors.length === 0,
+    pids: listeningPids,
+    forcedPids,
+  };
+};
+
+export const startWithPortTakeover = async <T>({
+  port,
+  start,
+  reclaim,
+}: {
+  port: number;
+  start: () => T;
+  reclaim: (
+    port: number,
+  ) => Promise<{ ok: boolean; pids: number[]; forcedPids: number[] }>;
+}): Promise<T> => {
+  try {
+    return start();
+  } catch (error) {
+    if (!isAddressInUseError(error)) {
+      throw error;
+    }
+
+    console.warn(
+      JSON.stringify({
+        level: "warn",
+        event: "runtime.port_reclaim_start",
+        port,
+      }),
+    );
+
+    const reclaimResult = await reclaim(port);
+    if (!reclaimResult.ok) {
+      throw new Error(
+        `Failed to reclaim busy port ${String(port)}. Listener pids: ${reclaimResult.pids.join(", ") || "none"}`,
+        { cause: error },
+      );
+    }
+
+    console.warn(
+      JSON.stringify({
+        level: "warn",
+        event: "runtime.port_reclaim_complete",
+        port,
+        pids: reclaimResult.pids,
+        forcedPids: reclaimResult.forcedPids,
+      }),
+    );
+
+    try {
+      return start();
+    } catch (retryError) {
+      throw new Error(
+        `Failed to start server on port ${String(port)} after reclaim attempt`,
+        { cause: retryError },
+      );
+    }
+  }
+};
+
+export const classifyWorkerExit = (
+  code: number,
+): "requested_restart" | "clean_stop" | "unexpected_exit" => {
+  if (code === RESTART_EXIT_CODE) {
+    return "requested_restart";
+  }
+
+  if (code === 0) {
+    return "clean_stop";
+  }
+
+  return "unexpected_exit";
+};
 
 const runWorkerProcess = async (): Promise<number> => {
   const config = loadConfig();
@@ -47,11 +242,16 @@ const runWorkerProcess = async (): Promise<number> => {
     });
   }
 
-  const server = startHttpServer({
-    config,
-    sessionStore,
-    modelPort,
-    buildInfo,
+  const server = await startWithPortTakeover({
+    port: config.port,
+    start: () =>
+      startHttpServer({
+        config,
+        sessionStore,
+        modelPort,
+        buildInfo,
+      }),
+    reclaim: reclaimPortFromPriorAssistant,
   });
   const stopController = new AbortController();
   let restartRequested = false;
@@ -209,9 +409,15 @@ const runSupervisor = async (): Promise<number> => {
       break;
     }
 
-    if (code === RESTART_EXIT_CODE) {
+    const exitKind = classifyWorkerExit(code);
+    if (exitKind === "requested_restart") {
       console.log("worker exited for requested restart; starting new worker");
       continue;
+    }
+
+    if (exitKind === "clean_stop") {
+      console.log("worker exited cleanly; supervisor stopping");
+      break;
     }
 
     console.error(
@@ -224,8 +430,12 @@ const runSupervisor = async (): Promise<number> => {
   return 0;
 };
 
-const isWorkerRole = process.env.ASSISTANT_PROCESS_ROLE === WORKER_ROLE;
-const exitCode = isWorkerRole
-  ? await runWorkerProcess()
-  : await runSupervisor();
-process.exit(exitCode);
+export const runEntrypoint = async (): Promise<number> => {
+  const isWorkerRole = process.env.ASSISTANT_PROCESS_ROLE === WORKER_ROLE;
+  return isWorkerRole ? runWorkerProcess() : runSupervisor();
+};
+
+if (import.meta.main) {
+  const exitCode = await runEntrypoint();
+  process.exit(exitCode);
+}

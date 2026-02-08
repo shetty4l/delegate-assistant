@@ -23,7 +23,7 @@
     "format": "biome check --write apps/**/src packages/**/src docs README.md .github",
     "format:check": "biome check apps/**/src packages/**/src docs README.md .github",
     "docs:check": "remark docs README.md --frail",
-    "verify": "bun run typecheck && bun run lint && bun run format:check && bun run build && bun run test && bun run docs:check",
+    "verify": "bun run typecheck && bun run format && bun run lint && bun run format:check && bun run build && bun run test && bun run docs:check",
     "validate": "bun run verify"
   },
   "devDependencies": {
