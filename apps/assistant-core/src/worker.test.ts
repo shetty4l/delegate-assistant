@@ -572,6 +572,39 @@ describe("telegram opencode relay", () => {
     expect(store.pendingStartupAck?.chatId).toBe("chat-restart");
   });
 
+  test("handles /restart as deterministic control intent", async () => {
+    const chatPort = new CapturingChatPort();
+    const store = new MemorySessionStore();
+    let modelCalls = 0;
+    let restartRequested = 0;
+    const model = new ScriptedModel(async () => {
+      modelCalls += 1;
+      return {
+        mode: "chat_reply",
+        confidence: 1,
+        replyText: "unused",
+        sessionId: "ses-any",
+      };
+    });
+
+    await handleChatMessage(
+      { chatPort, modelPort: model, sessionStore: store },
+      inbound("/restart", null, "chat-restart-slash"),
+      {
+        defaultWorkspacePath: defaultWorkspace,
+        onRestartRequested: async () => {
+          restartRequested += 1;
+        },
+      },
+    );
+
+    expect(modelCalls).toBe(0);
+    expect(restartRequested).toBe(1);
+    expect(chatPort.sent[0]?.text).toContain("restarting");
+    expect(store.pendingStartupAck).not.toBeNull();
+    expect(store.pendingStartupAck?.chatId).toBe("chat-restart-slash");
+  });
+
   test("flushes pending startup ack and clears marker", async () => {
     const chatPort = new CapturingChatPort();
     const store = new MemorySessionStore();
