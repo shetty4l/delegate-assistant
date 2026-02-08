@@ -2,6 +2,9 @@
   "name": "@delegate/adapters-session-store-sqlite",
   "private": true,
   "type": "module",
+  "scripts": {
+    "test": "bun test tests/"
+  },
   "exports": {
     ".": "./src/index.ts"
   }

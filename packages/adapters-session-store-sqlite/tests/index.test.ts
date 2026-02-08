@@ -6,7 +6,7 @@ import {
   decodeSessionKeyId,
   encodeSessionKeyId,
   SqliteSessionStore,
-} from "./index";
+} from "@delegate/adapters-session-store-sqlite";
 
 const buildStore = async (): Promise<{
   store: SqliteSessionStore;

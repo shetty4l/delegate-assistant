@@ -2,7 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-
+import type { BuildInfo } from "@assistant-core/src/version";
+import {
+  flushPendingStartupAck,
+  handleChatMessage,
+} from "@assistant-core/src/worker";
 import type {
   InboundMessage,
   ModelTurnResponse,
@@ -14,8 +18,6 @@ import type {
   ModelPort,
   RespondInput,
 } from "@delegate/ports";
-import type { BuildInfo } from "./version";
-import { flushPendingStartupAck, handleChatMessage } from "./worker";
 
 class CapturingChatPort implements ChatPort {
   readonly sent: OutboundMessage[] = [];

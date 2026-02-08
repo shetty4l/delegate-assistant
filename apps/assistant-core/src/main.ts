@@ -1,16 +1,18 @@
-import { OpencodeCliModelAdapter } from "@delegate/adapters-model-opencode-cli";
-import { DeterministicModelStub } from "@delegate/adapters-model-stub";
-import { TelegramLongPollingAdapter } from "@delegate/adapters-telegram";
-
-import { loadConfig } from "./config";
-import { startHttpServer } from "./http";
+import { loadConfig } from "@assistant-core/src/config";
+import { startHttpServer } from "@assistant-core/src/http";
 import {
   ensureOpencodeServer,
   probeOpencodeReachability,
-} from "./opencode-server";
-import { SqliteSessionStore } from "./session-store";
-import { formatVersionFingerprint, loadBuildInfo } from "./version";
-import { startTelegramWorker } from "./worker";
+} from "@assistant-core/src/opencode-server";
+import { SqliteSessionStore } from "@assistant-core/src/session-store";
+import {
+  formatVersionFingerprint,
+  loadBuildInfo,
+} from "@assistant-core/src/version";
+import { startTelegramWorker } from "@assistant-core/src/worker";
+import { OpencodeCliModelAdapter } from "@delegate/adapters-model-opencode-cli";
+import { DeterministicModelStub } from "@delegate/adapters-model-stub";
+import { TelegramLongPollingAdapter } from "@delegate/adapters-telegram";
 
 const RESTART_EXIT_CODE = 75;
 const WORKER_ROLE = "worker";

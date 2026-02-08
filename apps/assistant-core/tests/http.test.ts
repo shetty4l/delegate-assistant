@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
-import type { AppConfig } from "./config";
-import { runReadinessChecks, startHttpServer } from "./http";
-import type { BuildInfo } from "./version";
+import type { AppConfig } from "@assistant-core/src/config";
+import { runReadinessChecks, startHttpServer } from "@assistant-core/src/http";
+import type { BuildInfo } from "@assistant-core/src/version";
 
 const baseConfig = (): AppConfig => ({
   configSourcePath: "/tmp/config.json",

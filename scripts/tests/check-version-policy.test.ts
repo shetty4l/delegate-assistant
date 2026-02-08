@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { validateVersionPolicy } from "./check-version-policy";
+import { validateVersionPolicy } from "../check-version-policy";
 
 describe("validateVersionPolicy", () => {
   test("passes for valid non-CI local checks", () => {
