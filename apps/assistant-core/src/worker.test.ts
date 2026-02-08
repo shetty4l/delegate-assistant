@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -295,6 +295,20 @@ const inbound = (
 
 const defaultWorkspace = process.cwd();
 
+const runGit = (cwd: string, args: string[]): void => {
+  const proc = Bun.spawnSync({
+    cmd: ["git", ...args],
+    cwd,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  if (proc.exitCode !== 0) {
+    const stderr = new TextDecoder().decode(proc.stderr).trim();
+    const stdout = new TextDecoder().decode(proc.stdout).trim();
+    throw new Error(stderr || stdout || `git ${args.join(" ")} failed`);
+  }
+};
+
 const buildInfoFixture: BuildInfo = {
   service: "delegate-assistant",
   releaseVersion: "0.1.0",
@@ -356,7 +370,49 @@ describe("telegram opencode relay", () => {
     expect(persisted?.opencodeSessionId).toBe("ses-123");
   });
 
-  test("expands /sync-main slash command into common workflow prompt", async () => {
+  test("handles /sync-main deterministically on successful git sync", async () => {
+    const chatPort = new CapturingChatPort();
+    const store = new MemorySessionStore();
+    const baseDir = await mkdtemp(join(tmpdir(), "delegate-sync-main-"));
+    const remoteRepo = join(baseDir, "remote.git");
+    const localRepo = join(baseDir, "local");
+    runGit(baseDir, ["init", "--bare", remoteRepo]);
+    runGit(baseDir, ["clone", remoteRepo, localRepo]);
+    runGit(localRepo, ["config", "user.email", "test@example.com"]);
+    runGit(localRepo, ["config", "user.name", "Test User"]);
+    await writeFile(join(localRepo, "README.md"), "hello\n", "utf8");
+    runGit(localRepo, ["add", "README.md"]);
+    runGit(localRepo, ["commit", "-m", "init"]);
+    runGit(localRepo, ["branch", "-M", "main"]);
+    runGit(localRepo, ["push", "-u", "origin", "main"]);
+
+    let modelCalls = 0;
+    const model = new ScriptedModel(async (input) => {
+      modelCalls += 1;
+      return {
+        mode: "chat_reply",
+        confidence: 1,
+        replyText: `fallback:${input.text}`,
+        sessionId: "ses-sync",
+      };
+    });
+
+    await handleChatMessage(
+      { chatPort, modelPort: model, sessionStore: store },
+      inbound("/sync-main", null, "chat-sync-main"),
+      { defaultWorkspacePath: localRepo },
+    );
+
+    expect(modelCalls).toBe(0);
+    expect(chatPort.sent[0]?.text).toContain("Rebased onto `origin/main`");
+    expect(chatPort.sent[0]?.text).toContain(
+      "Branch status: ## main...origin/main",
+    );
+
+    await rm(baseDir, { recursive: true, force: true });
+  });
+
+  test("falls back to model for /sync-main when deterministic flow fails", async () => {
     const chatPort = new CapturingChatPort();
     const store = new MemorySessionStore();
     let receivedText = "";
@@ -365,21 +421,27 @@ describe("telegram opencode relay", () => {
       return {
         mode: "chat_reply",
         confidence: 1,
-        replyText: "done",
-        sessionId: "ses-sync",
+        replyText: "fallback-done",
+        sessionId: "ses-sync-fallback",
       };
     });
 
+    const nonRepoWorkspace = await mkdtemp(
+      join(tmpdir(), "delegate-not-repo-"),
+    );
+
     await handleChatMessage(
       { chatPort, modelPort: model, sessionStore: store },
-      inbound("/sync-main", null, "chat-sync-main"),
-      { defaultWorkspacePath: defaultWorkspace },
+      inbound("/sync-main", null, "chat-sync-main-fallback"),
+      { defaultWorkspacePath: nonRepoWorkspace },
     );
 
     expect(receivedText).toBe(
       "Merged. Go back to main, rebase from origin and confirm.",
     );
-    expect(chatPort.sent[0]?.text).toBe("done");
+    expect(chatPort.sent[0]?.text).toBe("fallback-done");
+
+    await rm(nonRepoWorkspace, { recursive: true, force: true });
   });
 
   test("retries once with fresh session when resumed session fails", async () => {
@@ -680,6 +742,60 @@ describe("telegram opencode relay", () => {
     expect(chatPort.sent[0]?.text).toContain(
       "add supervisor-managed graceful restart flow",
     );
+  });
+
+  test("handles /version as deterministic control intent", async () => {
+    const chatPort = new CapturingChatPort();
+    const store = new MemorySessionStore();
+    let modelCalls = 0;
+    const model = new ScriptedModel(async () => {
+      modelCalls += 1;
+      return {
+        mode: "chat_reply",
+        confidence: 1,
+        replyText: "unused",
+        sessionId: "ses-any",
+      };
+    });
+
+    await handleChatMessage(
+      { chatPort, modelPort: model, sessionStore: store },
+      inbound("/version", null, "chat-version-slash"),
+      {
+        defaultWorkspacePath: defaultWorkspace,
+        buildInfo: buildInfoFixture,
+      },
+    );
+
+    expect(modelCalls).toBe(0);
+    expect(chatPort.sent[0]?.text).toContain("0.1.0+abc1234");
+    expect(chatPort.sent[0]?.text).toContain("branch main");
+  });
+
+  test("does not delegate unknown slash command to model", async () => {
+    const chatPort = new CapturingChatPort();
+    const store = new MemorySessionStore();
+    let modelCalls = 0;
+    const model = new ScriptedModel(async () => {
+      modelCalls += 1;
+      return {
+        mode: "chat_reply",
+        confidence: 1,
+        replyText: "unused",
+        sessionId: "ses-any",
+      };
+    });
+
+    await handleChatMessage(
+      { chatPort, modelPort: model, sessionStore: store },
+      inbound("/unknown", null, "chat-unknown-slash"),
+      {
+        defaultWorkspacePath: defaultWorkspace,
+      },
+    );
+
+    expect(modelCalls).toBe(0);
+    expect(chatPort.sent[0]?.text).toContain("Unknown slash command");
   });
 
   test("handles workspace switching intents deterministically", async () => {

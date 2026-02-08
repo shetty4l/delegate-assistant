@@ -371,6 +371,7 @@ type WorkspaceIntent =
   | { kind: "where_am_i" }
   | { kind: "list_repos" }
   | { kind: "version" }
+  | { kind: "sync_main" }
   | { kind: "schedule_reminder"; whenText: string; reminderText: string }
   | { kind: "none" };
 
@@ -401,10 +402,114 @@ const parseWorkspaceIntent = (text: string): WorkspaceIntent => {
   if (/^(list\s+repos|repos)$/i.test(trimmed)) {
     return { kind: "list_repos" };
   }
-  if (/^(version|app\s+version|assistant\s+version)$/i.test(trimmed)) {
+  if (
+    /^(\/version|version|app\s+version|assistant\s+version)$/i.test(trimmed)
+  ) {
     return { kind: "version" };
   }
+  if (/^\/sync-main$/i.test(trimmed)) {
+    return { kind: "sync_main" };
+  }
   return { kind: "none" };
+};
+
+const runGitCommand = (
+  workspacePath: string,
+  args: string[],
+): { ok: boolean; stdout: string; stderr: string; exitCode: number } => {
+  const proc = Bun.spawnSync({
+    cmd: ["git", ...args],
+    cwd: workspacePath,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const stdout = new TextDecoder().decode(proc.stdout).trim();
+  const stderr = new TextDecoder().decode(proc.stderr).trim();
+  return {
+    ok: proc.exitCode === 0,
+    stdout,
+    stderr,
+    exitCode: proc.exitCode,
+  };
+};
+
+const runSyncMainWorkflow = (
+  workspacePath: string,
+):
+  | {
+      ok: true;
+      statusLine: string;
+      headLine: string;
+    }
+  | {
+      ok: false;
+      command: string;
+      details: string;
+    } => {
+  const insideRepo = runGitCommand(workspacePath, [
+    "rev-parse",
+    "--is-inside-work-tree",
+  ]);
+  if (!insideRepo.ok || insideRepo.stdout !== "true") {
+    return {
+      ok: false,
+      command: "git rev-parse --is-inside-work-tree",
+      details: insideRepo.stderr || insideRepo.stdout || "not a git repository",
+    };
+  }
+
+  const steps: Array<{ args: string[]; label: string }> = [
+    { args: ["switch", "main"], label: "git switch main" },
+    { args: ["fetch", "origin"], label: "git fetch origin" },
+    { args: ["rebase", "origin/main"], label: "git rebase origin/main" },
+  ];
+
+  for (const step of steps) {
+    const result = runGitCommand(workspacePath, step.args);
+    if (!result.ok) {
+      return {
+        ok: false,
+        command: step.label,
+        details: result.stderr || result.stdout || `exit ${result.exitCode}`,
+      };
+    }
+  }
+
+  const status = runGitCommand(workspacePath, [
+    "status",
+    "--short",
+    "--branch",
+  ]);
+  if (!status.ok) {
+    return {
+      ok: false,
+      command: "git status --short --branch",
+      details: status.stderr || status.stdout || `exit ${status.exitCode}`,
+    };
+  }
+  const statusLine =
+    status.stdout.split("\n")[0]?.trim() || "(status unavailable)";
+
+  const head = runGitCommand(workspacePath, [
+    "log",
+    "-1",
+    "--oneline",
+    "--decorate",
+  ]);
+  if (!head.ok) {
+    return {
+      ok: false,
+      command: "git log -1 --oneline --decorate",
+      details: head.stderr || head.stdout || `exit ${head.exitCode}`,
+    };
+  }
+  const headLine = head.stdout.split("\n")[0]?.trim() || "(head unavailable)";
+
+  return {
+    ok: true,
+    statusLine,
+    headLine,
+  };
 };
 
 const ISO_SCHEDULE_PATTERN =
@@ -522,6 +627,8 @@ const expandSlashCommand = (text: string): string => {
   }
   return text;
 };
+
+const isSlashCommand = (text: string): boolean => text.trim().startsWith("/");
 
 const classifyRelayError = (error: unknown): RelayErrorClass => {
   const text = String(error).toLowerCase();
@@ -1093,6 +1200,41 @@ export const handleChatMessage = async (
     return;
   }
 
+  if (intent.kind === "sync_main") {
+    const syncResult = runSyncMainWorkflow(activeWorkspacePath);
+    if (syncResult.ok) {
+      await sendMessage(
+        deps.chatPort,
+        {
+          chatId: message.chatId,
+          threadId: message.threadId ?? null,
+          text: [
+            "Done.",
+            "",
+            "- Switched to `main`",
+            "- Fetched from `origin`",
+            "- Rebased onto `origin/main`",
+            `- Branch status: ${syncResult.statusLine}`,
+            `- Current HEAD: ${syncResult.headLine}`,
+          ].join("\n"),
+        },
+        {
+          action: "runtime",
+          stage: "sync_main",
+          workspacePath: activeWorkspacePath,
+        },
+      );
+      return;
+    }
+
+    logError("runtime.sync_main_failed", {
+      workspacePath: activeWorkspacePath,
+      command: syncResult.command,
+      error: syncResult.details,
+      fallback: "model",
+    });
+  }
+
   if (intent.kind === "schedule_reminder") {
     if (intent.reminderText.length === 0) {
       await sendMessage(
@@ -1208,6 +1350,19 @@ export const handleChatMessage = async (
         text: `Workspace switched to ${normalized}`,
       },
       { action: "workspace", stage: "switched", topicKey },
+    );
+    return;
+  }
+
+  if (intent.kind === "none" && isSlashCommand(message.text)) {
+    await sendMessage(
+      deps.chatPort,
+      {
+        chatId: message.chatId,
+        threadId: message.threadId ?? null,
+        text: "Unknown slash command. Supported: /start, /restart, /version, /sync-main",
+      },
+      { action: "runtime", stage: "unknown_slash" },
     );
     return;
   }
