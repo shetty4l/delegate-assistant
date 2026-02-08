@@ -121,7 +121,36 @@ Active adapters:
 
 Legacy workflow-oriented modules may remain in repo history but are not part of runtime path.
 
-## 10. Configuration
+## 10. Workspace Aliases and Module Organization
+
+The codebase uses workspace aliases for clean, resilient imports:
+
+**tsconfig.base.json paths:**
+```json
+{
+  "baseUrl": ".",
+  "paths": {
+    "@assistant-core/src/*": ["apps/assistant-core/src/*"],
+    "@delegate/domain/*": ["packages/domain/src/*"],
+    "@delegate/ports/*": ["packages/ports/src/*"],
+    "@delegate/adapters-telegram/*": ["packages/adapters-telegram/src/*"],
+    "@delegate/adapters-model-opencode-cli/*": ["packages/adapters-model-opencode-cli/src/*"],
+    "@delegate/adapters-model-stub/*": ["packages/adapters-model-stub/src/*"],
+    "@delegate/adapters-session-store-sqlite/*": ["packages/adapters-session-store-sqlite/src/*"]
+  }
+}
+```
+
+**Test Separation:**
+- Production code: `src/` directories
+- Test code: `tests/` directories  
+- Package test scripts: `bun test tests/`
+
+**Package Structure (Post-Cleanup):**
+- 6 active packages (removed 4 empty packages)
+- Clean hexagonal architecture: domain → ports → adapters
+
+## 11. Configuration
 
 Primary source:
 - `~/.config/delegate-assistant/config.json`
