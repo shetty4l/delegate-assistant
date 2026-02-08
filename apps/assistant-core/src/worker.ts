@@ -2,6 +2,7 @@ import { existsSync, statSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import type { InboundMessage } from "@delegate/domain";
 import type { ChatPort, ModelPort } from "@delegate/ports";
+import { type BuildInfo, formatVersionFingerprint } from "./version";
 
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => {
@@ -36,6 +37,21 @@ type SessionStoreLike = {
     workspacePath: string,
     updatedAt: string,
   ): Promise<void>;
+  getPendingStartupAck?(): Promise<{
+    chatId: string;
+    threadId: string | null;
+    requestedAt: string;
+    attemptCount: number;
+    lastError: string | null;
+  } | null>;
+  upsertPendingStartupAck?(entry: {
+    chatId: string;
+    threadId: string | null;
+    requestedAt: string;
+    attemptCount: number;
+    lastError: string | null;
+  }): Promise<void>;
+  clearPendingStartupAck?(): Promise<void>;
 };
 
 type WorkerDeps = {
@@ -54,6 +70,7 @@ type WorkerOptions = {
   progressMaxCount?: number;
   defaultWorkspacePath?: string;
   stopSignal?: AbortSignal;
+  buildInfo?: BuildInfo;
   onRestartRequested?: (input: {
     chatId: string;
     threadId: string | null;
@@ -226,6 +243,7 @@ type WorkspaceIntent =
   | { kind: "use_repo"; rawPath: string }
   | { kind: "where_am_i" }
   | { kind: "list_repos" }
+  | { kind: "version" }
   | { kind: "none" };
 
 const parseWorkspaceIntent = (text: string): WorkspaceIntent => {
@@ -239,6 +257,9 @@ const parseWorkspaceIntent = (text: string): WorkspaceIntent => {
   }
   if (/^(list\s+repos|repos)$/i.test(trimmed)) {
     return { kind: "list_repos" };
+  }
+  if (/^(version|app\s+version|assistant\s+version)$/i.test(trimmed)) {
+    return { kind: "version" };
   }
   return { kind: "none" };
 };
@@ -436,6 +457,58 @@ const persistSessionId = async (
   });
 };
 
+export const flushPendingStartupAck = async (
+  deps: WorkerDeps,
+): Promise<void> => {
+  if (!deps.sessionStore?.getPendingStartupAck) {
+    return;
+  }
+
+  const pending = await deps.sessionStore.getPendingStartupAck();
+  if (!pending) {
+    return;
+  }
+
+  try {
+    await sendMessage(
+      deps.chatPort,
+      {
+        chatId: pending.chatId,
+        threadId: pending.threadId,
+        text: "Restart complete. I'm back online.",
+      },
+      {
+        action: "runtime",
+        stage: "startup_ack",
+      },
+    );
+    if (deps.sessionStore.clearPendingStartupAck) {
+      await deps.sessionStore.clearPendingStartupAck();
+    }
+    logInfo("startup_ack.sent", {
+      chatId: pending.chatId,
+      threadId: pending.threadId,
+      requestedAt: pending.requestedAt,
+      attemptsBeforeSuccess: pending.attemptCount,
+    });
+  } catch (error) {
+    if (deps.sessionStore.upsertPendingStartupAck) {
+      await deps.sessionStore.upsertPendingStartupAck({
+        ...pending,
+        attemptCount: pending.attemptCount + 1,
+        lastError: String(error),
+      });
+    }
+    logError("startup_ack.failed", {
+      chatId: pending.chatId,
+      threadId: pending.threadId,
+      requestedAt: pending.requestedAt,
+      attemptCount: pending.attemptCount + 1,
+      error: String(error),
+    });
+  }
+};
+
 export const handleChatMessage = async (
   deps: WorkerDeps,
   message: InboundMessage,
@@ -451,6 +524,9 @@ export const handleChatMessage = async (
   const defaultWorkspacePath = resolve(
     options.defaultWorkspacePath ?? process.cwd(),
   );
+  const versionText = options.buildInfo
+    ? formatVersionFingerprint(options.buildInfo)
+    : "delegate-assistant version unavailable";
 
   await evictIdleSessions(deps, sessionIdleTimeoutMs, sessionMaxConcurrent);
 
@@ -489,6 +565,19 @@ export const handleChatMessage = async (
       },
       { action: "runtime", stage: "restart_requested" },
     );
+    if (deps.sessionStore?.upsertPendingStartupAck) {
+      await deps.sessionStore.upsertPendingStartupAck({
+        chatId: message.chatId,
+        threadId: message.threadId ?? null,
+        requestedAt: nowIso(),
+        attemptCount: 0,
+        lastError: null,
+      });
+      logInfo("startup_ack.scheduled", {
+        chatId: message.chatId,
+        threadId: message.threadId ?? null,
+      });
+    }
     if (options.onRestartRequested) {
       await options.onRestartRequested({
         chatId: message.chatId,
@@ -536,6 +625,19 @@ export const handleChatMessage = async (
         text: `Known workspaces:\n${lines.join("\n")}`,
       },
       { action: "workspace", stage: "list", topicKey, count: repos.length },
+    );
+    return;
+  }
+
+  if (intent.kind === "version") {
+    await sendMessage(
+      deps.chatPort,
+      {
+        chatId: message.chatId,
+        threadId: message.threadId ?? null,
+        text: versionText,
+      },
+      { action: "runtime", stage: "version" },
     );
     return;
   }
@@ -718,6 +820,14 @@ export const startTelegramWorker = (
   let cursor: number | null = null;
 
   const loop = async (): Promise<void> => {
+    try {
+      await flushPendingStartupAck(deps);
+    } catch (error) {
+      logError("startup_ack.cycle_failed", {
+        error: String(error),
+      });
+    }
+
     if (deps.sessionStore) {
       try {
         cursor = await deps.sessionStore.getCursor();

@@ -9,6 +9,14 @@ export type SessionMapping = {
   status: "active" | "stale";
 };
 
+export type PendingStartupAck = {
+  chatId: string;
+  threadId: string | null;
+  requestedAt: string;
+  attemptCount: number;
+  lastError: string | null;
+};
+
 export class SqliteSessionStore {
   private db: Database | null = null;
 
@@ -238,6 +246,82 @@ export class SqliteSessionStore {
 
     const parsed = Number(row.state_value);
     return Number.isInteger(parsed) ? parsed : null;
+  }
+
+  async getPendingStartupAck(): Promise<PendingStartupAck | null> {
+    const row = this.ensureDb()
+      .query(
+        `
+          SELECT state_value
+          FROM runtime_state
+          WHERE state_key = 'pending_startup_ack'
+        `,
+      )
+      .get() as { state_value: string } | null;
+
+    if (!row) {
+      return null;
+    }
+
+    try {
+      const parsed = JSON.parse(row.state_value) as {
+        chatId?: string;
+        threadId?: string | null;
+        requestedAt?: string;
+        attemptCount?: number;
+        lastError?: string | null;
+      };
+      if (!parsed || typeof parsed !== "object") {
+        return null;
+      }
+      if (typeof parsed.chatId !== "string" || parsed.chatId.length === 0) {
+        return null;
+      }
+
+      return {
+        chatId: parsed.chatId,
+        threadId: typeof parsed.threadId === "string" ? parsed.threadId : null,
+        requestedAt:
+          typeof parsed.requestedAt === "string"
+            ? parsed.requestedAt
+            : new Date().toISOString(),
+        attemptCount:
+          typeof parsed.attemptCount === "number" &&
+          Number.isInteger(parsed.attemptCount) &&
+          parsed.attemptCount >= 0
+            ? parsed.attemptCount
+            : 0,
+        lastError:
+          typeof parsed.lastError === "string" ? parsed.lastError : null,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  async upsertPendingStartupAck(entry: PendingStartupAck): Promise<void> {
+    this.ensureDb()
+      .query(
+        `
+          INSERT INTO runtime_state (state_key, state_value, updated_at)
+          VALUES ('pending_startup_ack', $state_value, $updated_at)
+          ON CONFLICT(state_key) DO UPDATE SET
+            state_value = excluded.state_value,
+            updated_at = excluded.updated_at
+        `,
+      )
+      .run({
+        state_value: JSON.stringify(entry),
+        updated_at: new Date().toISOString(),
+      });
+  }
+
+  async clearPendingStartupAck(): Promise<void> {
+    this.ensureDb()
+      .query(
+        `DELETE FROM runtime_state WHERE state_key = 'pending_startup_ack'`,
+      )
+      .run();
   }
 
   private ensureDb(): Database {
