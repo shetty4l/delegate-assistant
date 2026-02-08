@@ -80,38 +80,4 @@ describe("SqliteSessionStore admin queries", () => {
       await cleanup();
     }
   });
-
-  test("excludes schedules with pending delivery ack from due query", async () => {
-    const { store, cleanup } = await buildStore();
-
-    try {
-      const createdAt = "2026-02-08T00:00:00.000Z";
-      const nowIso = "2026-02-13T19:01:00.000Z";
-
-      for (let i = 0; i < 205; i += 1) {
-        const id = await store.enqueueScheduledMessage({
-          chatId: "chat-overflow",
-          threadId: null,
-          text: `Reminder ${i}`,
-          sendAt: "2000-01-01T00:00:00.000Z",
-          createdAt,
-        });
-        await store.upsertPendingScheduledDeliveryAck({
-          id,
-          chatId: "chat-overflow",
-          deliveredAt: nowIso,
-          nextAttemptAt: nowIso,
-        });
-      }
-
-      const due = await store.listDueScheduledMessages({
-        nowIso,
-        limit: 500,
-      });
-
-      expect(due).toHaveLength(0);
-    } finally {
-      await cleanup();
-    }
-  });
 });

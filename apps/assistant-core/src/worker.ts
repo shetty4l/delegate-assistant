@@ -1,5 +1,4 @@
-import { existsSync, statSync } from "node:fs";
-import { isAbsolute, resolve } from "node:path";
+import { resolve } from "node:path";
 import type { InboundMessage } from "@delegate/domain";
 import type { ChatPort, ModelPort } from "@delegate/ports";
 import { type BuildInfo, formatVersionFingerprint } from "./version";
@@ -52,91 +51,6 @@ type SessionStoreLike = {
     lastError: string | null;
   }): Promise<void>;
   clearPendingStartupAck?(): Promise<void>;
-  enqueueScheduledMessage?(entry: {
-    chatId: string;
-    threadId: string | null;
-    text: string;
-    sendAt: string;
-    createdAt: string;
-  }): Promise<number>;
-  listDueScheduledMessages?(input: { nowIso: string; limit: number }): Promise<
-    Array<{
-      id: number;
-      chatId: string;
-      threadId: string | null;
-      text: string;
-      sendAt: string;
-      attemptCount: number;
-    }>
-  >;
-  markScheduledMessageDelivered?(input: {
-    id: number;
-    deliveredAt: string;
-  }): Promise<void>;
-  markScheduledMessageFailed?(input: {
-    id: number;
-    error: string;
-    nextAttemptAt: string;
-  }): Promise<void>;
-  upsertPendingScheduledDeliveryAck?(entry: {
-    id: number;
-    chatId: string;
-    deliveredAt: string;
-    nextAttemptAt: string;
-  }): Promise<void>;
-  listPendingScheduledDeliveryAcks?(limit: number): Promise<
-    Array<{
-      id: number;
-      chatId: string;
-      deliveredAt: string;
-      nextAttemptAt: string;
-    }>
-  >;
-  clearPendingScheduledDeliveryAck?(id: number): Promise<void>;
-};
-
-type SessionStoreWithPersistentScheduling = SessionStoreLike & {
-  enqueueScheduledMessage(entry: {
-    chatId: string;
-    threadId: string | null;
-    text: string;
-    sendAt: string;
-    createdAt: string;
-  }): Promise<number>;
-  listDueScheduledMessages(input: { nowIso: string; limit: number }): Promise<
-    Array<{
-      id: number;
-      chatId: string;
-      threadId: string | null;
-      text: string;
-      sendAt: string;
-      attemptCount: number;
-    }>
-  >;
-  markScheduledMessageDelivered(input: {
-    id: number;
-    deliveredAt: string;
-  }): Promise<void>;
-  markScheduledMessageFailed(input: {
-    id: number;
-    error: string;
-    nextAttemptAt: string;
-  }): Promise<void>;
-  upsertPendingScheduledDeliveryAck(entry: {
-    id: number;
-    chatId: string;
-    deliveredAt: string;
-    nextAttemptAt: string;
-  }): Promise<void>;
-  listPendingScheduledDeliveryAcks(limit: number): Promise<
-    Array<{
-      id: number;
-      chatId: string;
-      deliveredAt: string;
-      nextAttemptAt: string;
-    }>
-  >;
-  clearPendingScheduledDeliveryAck(id: number): Promise<void>;
 };
 
 type WorkerDeps = {
@@ -178,16 +92,6 @@ const sessionByKey = new Map<
 const lastThreadIdByChatId = new Map<string, string | null>();
 const activeWorkspaceByTopicKey = new Map<string, string>();
 const workspaceHistoryByTopicKey = new Map<string, Set<string>>();
-const inMemoryScheduledMessages: Array<{
-  id: number;
-  chatId: string;
-  threadId: string | null;
-  text: string;
-  sendAt: string;
-  attemptCount: number;
-  nextAttemptAt: string | null;
-}> = [];
-let nextInMemoryScheduleId = 1;
 
 const logInfo = (event: string, fields: LogFields = {}): void => {
   console.log(
@@ -265,37 +169,6 @@ const buildTopicKey = (message: InboundMessage): string =>
 const buildSessionKey = (topicKey: string, workspacePath: string): string =>
   JSON.stringify([topicKey, workspacePath]);
 
-const normalizeWorkspacePath = (
-  rawInput: string,
-  basePath: string,
-): string | null => {
-  const trimmed = rawInput.trim();
-  if (!trimmed) {
-    return null;
-  }
-  const unquoted =
-    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
-    (trimmed.startsWith("'") && trimmed.endsWith("'"))
-      ? trimmed.slice(1, -1).trim()
-      : trimmed;
-  if (!unquoted) {
-    return null;
-  }
-
-  return isAbsolute(unquoted) ? resolve(unquoted) : resolve(basePath, unquoted);
-};
-
-const isDirectoryPath = (path: string): boolean => {
-  if (!existsSync(path)) {
-    return false;
-  }
-  try {
-    return statSync(path).isDirectory();
-  } catch {
-    return false;
-  }
-};
-
 const rememberWorkspace = (topicKey: string, workspacePath: string): void => {
   const known = workspaceHistoryByTopicKey.get(topicKey) ?? new Set<string>();
   known.add(workspacePath);
@@ -325,93 +198,10 @@ const loadActiveWorkspace = async (
   return resolved;
 };
 
-const setActiveWorkspace = async (
-  deps: WorkerDeps,
-  topicKey: string,
-  workspacePath: string,
-): Promise<void> => {
-  activeWorkspaceByTopicKey.set(topicKey, workspacePath);
-  rememberWorkspace(topicKey, workspacePath);
-  const timestamp = nowIso();
-  if (deps.sessionStore?.setTopicWorkspace) {
-    await deps.sessionStore.setTopicWorkspace(
-      topicKey,
-      workspacePath,
-      timestamp,
-    );
-  }
-  if (deps.sessionStore?.touchTopicWorkspace) {
-    await deps.sessionStore.touchTopicWorkspace(
-      topicKey,
-      workspacePath,
-      timestamp,
-    );
-  }
-};
-
-const listKnownWorkspaces = async (
-  deps: WorkerDeps,
-  topicKey: string,
-  activeWorkspacePath: string,
-): Promise<string[]> => {
-  const known = new Set<string>([activeWorkspacePath]);
-  for (const item of workspaceHistoryByTopicKey.get(topicKey) ?? []) {
-    known.add(item);
-  }
-  if (deps.sessionStore?.listTopicWorkspaces) {
-    for (const item of await deps.sessionStore.listTopicWorkspaces(topicKey)) {
-      known.add(item);
-    }
-  }
-  return [...known].sort((a, b) => a.localeCompare(b));
-};
-
-type WorkspaceIntent =
-  | { kind: "use_repo"; rawPath: string }
-  | { kind: "where_am_i" }
-  | { kind: "list_repos" }
-  | { kind: "version" }
-  | { kind: "sync_main" }
-  | { kind: "schedule_reminder"; whenText: string; reminderText: string }
-  | { kind: "none" };
-
 const SYNC_MAIN_COMMAND = "/sync-main";
 const SYNC_MAIN_PROMPT =
   "Merged. Go back to main, rebase from origin and confirm.";
 const RESTART_COMMAND = "/restart";
-
-const parseWorkspaceIntent = (text: string): WorkspaceIntent => {
-  const trimmed = text.trim();
-  const remindMatch = /^remind\s+me\s+(?:on|at)\s+(.+?)\s+to\s+(.+)$/i.exec(
-    trimmed,
-  );
-  if (remindMatch) {
-    return {
-      kind: "schedule_reminder",
-      whenText: (remindMatch[1] ?? "").trim(),
-      reminderText: (remindMatch[2] ?? "").trim(),
-    };
-  }
-  const useMatch = /^use\s+repo\s+(.+)$/i.exec(trimmed);
-  if (useMatch) {
-    return { kind: "use_repo", rawPath: useMatch[1] ?? "" };
-  }
-  if (/^(where\s+am\s+i|pwd)$/i.test(trimmed)) {
-    return { kind: "where_am_i" };
-  }
-  if (/^(list\s+repos|repos)$/i.test(trimmed)) {
-    return { kind: "list_repos" };
-  }
-  if (
-    /^(\/version|version|app\s+version|assistant\s+version)$/i.test(trimmed)
-  ) {
-    return { kind: "version" };
-  }
-  if (/^\/sync-main$/i.test(trimmed)) {
-    return { kind: "sync_main" };
-  }
-  return { kind: "none" };
-};
 
 const runGitCommand = (
   workspacePath: string,
@@ -510,103 +300,6 @@ const runSyncMainWorkflow = (
     statusLine,
     headLine,
   };
-};
-
-const ISO_SCHEDULE_PATTERN =
-  /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})/;
-
-const parseIsoScheduleDate = (rawInput: string): Date | null => {
-  const trimmed = rawInput.trim();
-  if (!trimmed.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/)) {
-    return null;
-  }
-  const match = trimmed.match(ISO_SCHEDULE_PATTERN);
-  if (!match || match[0] !== trimmed) {
-    return null;
-  }
-
-  const parsed = new Date(trimmed);
-  if (Number.isNaN(parsed.getTime())) {
-    return null;
-  }
-
-  return parsed;
-};
-
-const resolveScheduleDateViaModel = async (
-  deps: WorkerDeps,
-  input: {
-    chatId: string;
-    threadId: string | null;
-    whenText: string;
-    workspacePath: string;
-    now: Date;
-  },
-): Promise<Date | null> => {
-  const directIso = parseIsoScheduleDate(input.whenText);
-  if (directIso) {
-    return directIso;
-  }
-
-  const resolutionPrompt = [
-    "Convert reminder time text into one exact timestamp.",
-    "Return only one line:",
-    "- ISO8601 timestamp with timezone offset (example: 2026-02-13T19:00:00-08:00)",
-    "- or INVALID",
-    "Rules:",
-    "- Interpret natural language relative to the provided current time.",
-    "- If timezone is omitted, use server local timezone.",
-    "- Do not include explanations.",
-    `Current server local time: ${input.now.toString()}`,
-    `Reminder text: ${input.whenText}`,
-  ].join("\n");
-
-  let responseText = "";
-  try {
-    const response = await deps.modelPort.respond({
-      chatId: input.chatId,
-      threadId: input.threadId,
-      text: resolutionPrompt,
-      context: [],
-      pendingProposalWorkItemId: null,
-      workspacePath: input.workspacePath,
-    });
-    responseText = response.replyText.trim();
-  } catch {
-    return null;
-  }
-
-  if (responseText.toUpperCase() === "INVALID") {
-    return null;
-  }
-
-  const resolvedIso = responseText.match(ISO_SCHEDULE_PATTERN)?.[0] ?? "";
-  if (!resolvedIso) {
-    return null;
-  }
-
-  const parsed = new Date(resolvedIso);
-  if (Number.isNaN(parsed.getTime())) {
-    return null;
-  }
-  return parsed;
-};
-
-const getPersistentScheduleStore = (
-  sessionStore: SessionStoreLike | undefined,
-): SessionStoreWithPersistentScheduling | null => {
-  if (
-    !sessionStore?.enqueueScheduledMessage ||
-    !sessionStore.listDueScheduledMessages ||
-    !sessionStore.markScheduledMessageDelivered ||
-    !sessionStore.markScheduledMessageFailed ||
-    !sessionStore.upsertPendingScheduledDeliveryAck ||
-    !sessionStore.listPendingScheduledDeliveryAcks ||
-    !sessionStore.clearPendingScheduledDeliveryAck
-  ) {
-    return null;
-  }
-  return sessionStore as SessionStoreWithPersistentScheduling;
 };
 
 const isRestartIntent = (text: string): boolean => {
@@ -888,183 +581,6 @@ export const flushPendingStartupAck = async (
   }
 };
 
-export const flushDueScheduledMessages = async (
-  deps: WorkerDeps,
-  now: Date = new Date(),
-): Promise<void> => {
-  const persistentScheduleStore = getPersistentScheduleStore(deps.sessionStore);
-  if (persistentScheduleStore) {
-    const nowIso = now.toISOString();
-    const pendingDeliveryAcks =
-      await persistentScheduleStore.listPendingScheduledDeliveryAcks(200);
-    const pendingDeliveryAckIds = new Set(
-      pendingDeliveryAcks.map((entry) => entry.id),
-    );
-    const pendingDeliveryStateUpdates = pendingDeliveryAcks
-      .filter((entry) => entry.nextAttemptAt <= nowIso)
-      .slice(0, 20);
-
-    for (const pendingAck of pendingDeliveryStateUpdates) {
-      try {
-        await persistentScheduleStore.markScheduledMessageDelivered({
-          id: pendingAck.id,
-          deliveredAt: pendingAck.deliveredAt,
-        });
-        await persistentScheduleStore.clearPendingScheduledDeliveryAck(
-          pendingAck.id,
-        );
-        logInfo("schedule.delivered", {
-          scheduleId: pendingAck.id,
-          chatId: pendingAck.chatId,
-          deliveredAt: pendingAck.deliveredAt,
-          persistedOnRetry: true,
-        });
-      } catch (error) {
-        const nextAttemptAt = new Date(now.getTime() + 60_000).toISOString();
-        await persistentScheduleStore.upsertPendingScheduledDeliveryAck({
-          id: pendingAck.id,
-          chatId: pendingAck.chatId,
-          deliveredAt: pendingAck.deliveredAt,
-          nextAttemptAt,
-        });
-        logError("schedule.delivery_state_failed", {
-          scheduleId: pendingAck.id,
-          chatId: pendingAck.chatId,
-          error: String(error),
-          nextAttemptAt,
-        });
-      }
-    }
-
-    const dueMessages = await persistentScheduleStore.listDueScheduledMessages({
-      nowIso,
-      limit: 20,
-    });
-
-    for (const scheduled of dueMessages) {
-      if (pendingDeliveryAckIds.has(scheduled.id)) {
-        continue;
-      }
-
-      try {
-        await sendMessage(
-          deps.chatPort,
-          {
-            chatId: scheduled.chatId,
-            threadId: scheduled.threadId,
-            text: scheduled.text,
-          },
-          {
-            action: "schedule",
-            stage: "deliver",
-            scheduleId: scheduled.id,
-            attempt: scheduled.attemptCount,
-          },
-        );
-      } catch (error) {
-        const nextAttemptAt = new Date(now.getTime() + 60_000).toISOString();
-        await persistentScheduleStore.markScheduledMessageFailed({
-          id: scheduled.id,
-          error: String(error),
-          nextAttemptAt,
-        });
-        logError("schedule.delivery_failed", {
-          scheduleId: scheduled.id,
-          chatId: scheduled.chatId,
-          error: String(error),
-          nextAttemptAt,
-        });
-        continue;
-      }
-
-      try {
-        await persistentScheduleStore.markScheduledMessageDelivered({
-          id: scheduled.id,
-          deliveredAt: nowIso,
-        });
-        logInfo("schedule.delivered", {
-          scheduleId: scheduled.id,
-          chatId: scheduled.chatId,
-          sendAt: scheduled.sendAt,
-        });
-      } catch (error) {
-        const nextAttemptAt = new Date(now.getTime() + 60_000).toISOString();
-        await persistentScheduleStore.upsertPendingScheduledDeliveryAck({
-          id: scheduled.id,
-          chatId: scheduled.chatId,
-          deliveredAt: nowIso,
-          nextAttemptAt,
-        });
-        logError("schedule.delivery_state_failed", {
-          scheduleId: scheduled.id,
-          chatId: scheduled.chatId,
-          error: String(error),
-          nextAttemptAt,
-        });
-      }
-    }
-  }
-
-  const nowIsoMemory = now.toISOString();
-  const dueInMemory = inMemoryScheduledMessages
-    .filter(
-      (item) =>
-        item.sendAt <= nowIsoMemory &&
-        (item.nextAttemptAt === null || item.nextAttemptAt <= nowIsoMemory),
-    )
-    .sort((a, b) => a.sendAt.localeCompare(b.sendAt) || a.id - b.id)
-    .slice(0, 20);
-
-  for (const scheduled of dueInMemory) {
-    try {
-      await sendMessage(
-        deps.chatPort,
-        {
-          chatId: scheduled.chatId,
-          threadId: scheduled.threadId,
-          text: scheduled.text,
-        },
-        {
-          action: "schedule",
-          stage: "deliver",
-          scheduleId: scheduled.id,
-          attempt: scheduled.attemptCount,
-          storage: "memory",
-        },
-      );
-      const index = inMemoryScheduledMessages.findIndex(
-        (item) => item.id === scheduled.id,
-      );
-      if (index >= 0) {
-        inMemoryScheduledMessages.splice(index, 1);
-      }
-      logInfo("schedule.delivered", {
-        scheduleId: scheduled.id,
-        chatId: scheduled.chatId,
-        sendAt: scheduled.sendAt,
-        storage: "memory",
-      });
-    } catch (error) {
-      const index = inMemoryScheduledMessages.findIndex(
-        (item) => item.id === scheduled.id,
-      );
-      if (index >= 0) {
-        inMemoryScheduledMessages[index] = {
-          ...inMemoryScheduledMessages[index],
-          attemptCount: scheduled.attemptCount + 1,
-          nextAttemptAt: new Date(now.getTime() + 60_000).toISOString(),
-        };
-      }
-      logError("schedule.delivery_failed", {
-        scheduleId: scheduled.id,
-        chatId: scheduled.chatId,
-        error: String(error),
-        storage: "memory",
-      });
-    }
-  }
-};
-
 export const handleChatMessage = async (
   deps: WorkerDeps,
   message: InboundMessage,
@@ -1152,42 +668,7 @@ export const handleChatMessage = async (
     defaultWorkspacePath,
   );
 
-  const intent = parseWorkspaceIntent(message.text);
-  if (intent.kind === "where_am_i") {
-    await sendMessage(
-      deps.chatPort,
-      {
-        chatId: message.chatId,
-        threadId: message.threadId ?? null,
-        text: `Current workspace: ${activeWorkspacePath}`,
-      },
-      { action: "workspace", stage: "where", topicKey },
-    );
-    return;
-  }
-
-  if (intent.kind === "list_repos") {
-    const repos = await listKnownWorkspaces(
-      deps,
-      topicKey,
-      activeWorkspacePath,
-    );
-    const lines = repos.map((repo) =>
-      repo === activeWorkspacePath ? `* ${repo} (active)` : `* ${repo}`,
-    );
-    await sendMessage(
-      deps.chatPort,
-      {
-        chatId: message.chatId,
-        threadId: message.threadId ?? null,
-        text: `Known workspaces:\n${lines.join("\n")}`,
-      },
-      { action: "workspace", stage: "list", topicKey, count: repos.length },
-    );
-    return;
-  }
-
-  if (intent.kind === "version") {
+  if (message.text.trim() === "/version") {
     await sendMessage(
       deps.chatPort,
       {
@@ -1200,7 +681,7 @@ export const handleChatMessage = async (
     return;
   }
 
-  if (intent.kind === "sync_main") {
+  if (message.text.trim() === "/sync-main") {
     const syncResult = runSyncMainWorkflow(activeWorkspacePath);
     if (syncResult.ok) {
       await sendMessage(
@@ -1227,134 +708,19 @@ export const handleChatMessage = async (
       return;
     }
 
-    logError("runtime.sync_main_failed", {
-      workspacePath: activeWorkspacePath,
-      command: syncResult.command,
-      error: syncResult.details,
-      fallback: "model",
-    });
-  }
-
-  if (intent.kind === "schedule_reminder") {
-    if (intent.reminderText.length === 0) {
-      await sendMessage(
-        deps.chatPort,
-        {
-          chatId: message.chatId,
-          threadId: message.threadId ?? null,
-          text: "I need reminder text as well. Try: remind me on <time> to <message>",
-        },
-        { action: "schedule", stage: "invalid_text" },
-      );
-      return;
-    }
-
-    const parsedDate = await resolveScheduleDateViaModel(deps, {
-      chatId: message.chatId,
-      threadId: message.threadId ?? null,
-      whenText: intent.whenText,
-      workspacePath: activeWorkspacePath,
-      now: new Date(),
-    });
-    if (!parsedDate) {
-      await sendMessage(
-        deps.chatPort,
-        {
-          chatId: message.chatId,
-          threadId: message.threadId ?? null,
-          text: "I couldn't parse that schedule time. Try: remind me at tomorrow 7pm to Watch Eternity on Apple TV+",
-        },
-        { action: "schedule", stage: "invalid_time" },
-      );
-      return;
-    }
-
-    if (parsedDate.getTime() <= Date.now()) {
-      await sendMessage(
-        deps.chatPort,
-        {
-          chatId: message.chatId,
-          threadId: message.threadId ?? null,
-          text: "That time is in the past. Please pick a future time.",
-        },
-        { action: "schedule", stage: "past_time" },
-      );
-      return;
-    }
-
-    const sendAtIso = parsedDate.toISOString();
-    const persistentScheduleStore = getPersistentScheduleStore(
-      deps.sessionStore,
-    );
-    const scheduleId = persistentScheduleStore
-      ? await persistentScheduleStore.enqueueScheduledMessage({
-          chatId: message.chatId,
-          threadId: message.threadId ?? null,
-          text: intent.reminderText,
-          sendAt: sendAtIso,
-          createdAt: nowIso(),
-        })
-      : (() => {
-          const id = nextInMemoryScheduleId;
-          nextInMemoryScheduleId += 1;
-          inMemoryScheduledMessages.push({
-            id,
-            chatId: message.chatId,
-            threadId: message.threadId ?? null,
-            text: intent.reminderText,
-            sendAt: sendAtIso,
-            attemptCount: 0,
-            nextAttemptAt: null,
-          });
-          return id;
-        })();
-
     await sendMessage(
       deps.chatPort,
       {
         chatId: message.chatId,
         threadId: message.threadId ?? null,
-        text: persistentScheduleStore
-          ? `Scheduled reminder (#${scheduleId}) for ${sendAtIso}: ${intent.reminderText}`
-          : `Scheduled reminder (#${scheduleId}) for ${sendAtIso}: ${intent.reminderText}\n\nNote: this reminder is in memory and will be lost if the assistant restarts before delivery.`,
+        text: `Sync failed: ${syncResult.command} - ${syncResult.details}`,
       },
-      { action: "schedule", stage: "scheduled", scheduleId },
+      { action: "runtime", stage: "sync_main_failed" },
     );
     return;
   }
 
-  if (intent.kind === "use_repo") {
-    const normalized = normalizeWorkspacePath(
-      intent.rawPath,
-      activeWorkspacePath,
-    );
-    if (!normalized || !isDirectoryPath(normalized)) {
-      await sendMessage(
-        deps.chatPort,
-        {
-          chatId: message.chatId,
-          threadId: message.threadId ?? null,
-          text: `I couldn't switch workspace. Directory not found: ${intent.rawPath.trim() || "(empty)"}`,
-        },
-        { action: "workspace", stage: "invalid", topicKey },
-      );
-      return;
-    }
-
-    await setActiveWorkspace(deps, topicKey, normalized);
-    await sendMessage(
-      deps.chatPort,
-      {
-        chatId: message.chatId,
-        threadId: message.threadId ?? null,
-        text: `Workspace switched to ${normalized}`,
-      },
-      { action: "workspace", stage: "switched", topicKey },
-    );
-    return;
-  }
-
-  if (intent.kind === "none" && isSlashCommand(message.text)) {
+  if (isSlashCommand(message.text)) {
     await sendMessage(
       deps.chatPort,
       {
@@ -1540,14 +906,6 @@ export const startTelegramWorker = (
     }
 
     while (!isStopping()) {
-      try {
-        await flushDueScheduledMessages(deps);
-      } catch (error) {
-        logError("schedule.cycle_failed", {
-          error: String(error),
-        });
-      }
-
       try {
         const updates = await deps.chatPort.receiveUpdates(cursor);
         if (updates.length > 0) {
