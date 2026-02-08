@@ -209,6 +209,32 @@ describe("telegram opencode relay", () => {
     expect(persisted?.opencodeSessionId).toBe("ses-123");
   });
 
+  test("expands /sync-main slash command into common workflow prompt", async () => {
+    const chatPort = new CapturingChatPort();
+    const store = new MemorySessionStore();
+    let receivedText = "";
+    const model = new ScriptedModel(async (input) => {
+      receivedText = input.text;
+      return {
+        mode: "chat_reply",
+        confidence: 1,
+        replyText: "done",
+        sessionId: "ses-sync",
+      };
+    });
+
+    await handleChatMessage(
+      { chatPort, modelPort: model, sessionStore: store },
+      inbound("/sync-main", null, "chat-sync-main"),
+      { defaultWorkspacePath: defaultWorkspace },
+    );
+
+    expect(receivedText).toBe(
+      "Merged. Go back to main, rebase from origin and confirm.",
+    );
+    expect(chatPort.sent[0]?.text).toBe("done");
+  });
+
   test("retries once with fresh session when resumed session fails", async () => {
     const chatPort = new CapturingChatPort();
     const store = new MemorySessionStore();
