@@ -12,6 +12,7 @@
     "typecheck": "bun run --cwd apps/assistant-core typecheck",
     "build": "bun run --cwd apps/assistant-core build",
     "test": "bun test",
+    "policy:version": "bun run scripts/check-version-policy.ts",
     "lint": "oxlint apps/**/src packages/**/src --deny-warnings",
     "format": "biome check --write apps/**/src packages/**/src docs README.md .github",
     "format:check": "biome check apps/**/src packages/**/src docs README.md .github",

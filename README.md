@@ -23,6 +23,20 @@ Current runtime entrypoints:
 - `packages/adapters-telegram/src/index.ts`
 - `packages/adapters-model-opencode-cli/src/index.ts`
 
+## Version Policy
+
+CI enforces strict version metadata before running the full verify pipeline.
+
+- Root `package.json` must contain a valid SemVer `version`.
+- On tag builds (`refs/tags/vX.Y.Z`), the tag version must exactly match `package.json`.
+- In CI, runtime metadata must be present and non-ambiguous:
+  - `GIT_SHA` (40-char lowercase sha)
+  - `GIT_BRANCH` (not `unknown`)
+  - `GIT_COMMIT_TITLE` (not `unknown`)
+
+Run locally:
+- `bun run policy:version`
+
 ## Manage macOS user service (launchd)
 
 Use these commands to manage the local `bun run dev` LaunchAgent on macOS.
