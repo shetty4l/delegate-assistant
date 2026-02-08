@@ -35,6 +35,15 @@ class FailingChatPort extends CapturingChatPort {
   }
 }
 
+class Thread400ThenSuccessChatPort extends CapturingChatPort {
+  override async send(message: OutboundMessage): Promise<void> {
+    if (message.threadId) {
+      throw new Error("Telegram sendMessage failed: 400");
+    }
+    this.sent.push(message);
+  }
+}
+
 class ScriptedModel implements ModelPort {
   constructor(
     private readonly respondFn: (
@@ -312,7 +321,7 @@ describe("telegram opencode relay", () => {
       },
     );
 
-    expect(chatPort.sent[0]?.text).toContain("I couldn't reach OpenCode");
+    expect(chatPort.sent[0]?.text).toContain("did not finish within");
     expect(store.staleMarks).toEqual([]);
   });
 
@@ -334,7 +343,28 @@ describe("telegram opencode relay", () => {
       },
     );
 
-    expect(chatPort.sent[0]?.text).toContain("I couldn't reach OpenCode");
+    expect(chatPort.sent[0]?.text).toContain("did not finish within");
+  });
+
+  test("retries delivery without thread on telegram 400", async () => {
+    const chatPort = new Thread400ThenSuccessChatPort();
+    const store = new MemorySessionStore();
+    const model = new ScriptedModel(async () => ({
+      mode: "chat_reply",
+      confidence: 1,
+      replyText: "ok",
+      sessionId: "ses-1",
+    }));
+
+    await handleChatMessage(
+      { chatPort, modelPort: model, sessionStore: store },
+      inbound("hello", "129", "chat-telegram-400"),
+      { defaultWorkspacePath: defaultWorkspace },
+    );
+
+    expect(chatPort.sent).toHaveLength(1);
+    expect(chatPort.sent[0]?.threadId).toBeUndefined();
+    expect(chatPort.sent[0]?.text).toBe("ok");
   });
 
   test("sends progress updates for long-running turns", async () => {
