@@ -15,7 +15,12 @@ import type {
   RespondInput,
 } from "@delegate/ports";
 import type { BuildInfo } from "./version";
-import { flushPendingStartupAck, handleChatMessage } from "./worker";
+import {
+  flushDueScheduledMessages,
+  flushPendingStartupAck,
+  handleChatMessage,
+  startTelegramWorker,
+} from "./worker";
 
 class CapturingChatPort implements ChatPort {
   readonly sent: OutboundMessage[] = [];
@@ -41,6 +46,20 @@ class Thread400ThenSuccessChatPort extends CapturingChatPort {
       throw new Error("Telegram sendMessage failed: 400");
     }
     this.sent.push(message);
+  }
+}
+
+class LoopingChatPort extends CapturingChatPort {
+  constructor(private readonly onReceive: (calls: number) => void) {
+    super();
+  }
+
+  private receiveCalls = 0;
+
+  override async receiveUpdates(_cursor: number | null): Promise<ChatUpdate[]> {
+    this.receiveCalls += 1;
+    this.onReceive(this.receiveCalls);
+    return [];
   }
 }
 
@@ -71,6 +90,29 @@ class MemorySessionStore {
     attemptCount: number;
     lastError: string | null;
   } | null = null;
+  scheduledMessages: Array<{
+    id: number;
+    chatId: string;
+    threadId: string | null;
+    text: string;
+    sendAt: string;
+    createdAt: string;
+    deliveredAt: string | null;
+    lastError: string | null;
+    attemptCount: number;
+    nextAttemptAt: string | null;
+    status: "pending" | "sent";
+  }> = [];
+  pendingDeliveryAcks = new Map<
+    number,
+    {
+      id: number;
+      chatId: string;
+      deliveredAt: string;
+      nextAttemptAt: string;
+    }
+  >();
+  private nextScheduledId = 1;
 
   async getSession(sessionKey: string) {
     return this.sessions.get(sessionKey) ?? null;
@@ -141,6 +183,102 @@ class MemorySessionStore {
 
   async clearPendingStartupAck() {
     this.pendingStartupAck = null;
+  }
+
+  async enqueueScheduledMessage(entry: {
+    chatId: string;
+    threadId: string | null;
+    text: string;
+    sendAt: string;
+    createdAt: string;
+  }): Promise<number> {
+    const id = this.nextScheduledId;
+    this.nextScheduledId += 1;
+    this.scheduledMessages.push({
+      id,
+      ...entry,
+      deliveredAt: null,
+      lastError: null,
+      attemptCount: 0,
+      nextAttemptAt: null,
+      status: "pending",
+    });
+    return id;
+  }
+
+  async listDueScheduledMessages(input: { nowIso: string; limit: number }) {
+    return this.scheduledMessages
+      .filter(
+        (item) =>
+          item.status === "pending" &&
+          item.sendAt <= input.nowIso &&
+          (item.nextAttemptAt === null || item.nextAttemptAt <= input.nowIso),
+      )
+      .sort((a, b) => a.sendAt.localeCompare(b.sendAt) || a.id - b.id)
+      .slice(0, input.limit)
+      .map((item) => ({
+        id: item.id,
+        chatId: item.chatId,
+        threadId: item.threadId,
+        text: item.text,
+        sendAt: item.sendAt,
+        attemptCount: item.attemptCount,
+      }));
+  }
+
+  async markScheduledMessageDelivered(input: {
+    id: number;
+    deliveredAt: string;
+  }) {
+    const message = this.scheduledMessages.find((item) => item.id === input.id);
+    if (!message) {
+      return;
+    }
+    message.status = "sent";
+    message.deliveredAt = input.deliveredAt;
+    message.lastError = null;
+    message.nextAttemptAt = null;
+  }
+
+  async markScheduledMessageFailed(input: {
+    id: number;
+    error: string;
+    nextAttemptAt: string;
+  }) {
+    const message = this.scheduledMessages.find((item) => item.id === input.id);
+    if (!message) {
+      return;
+    }
+    message.lastError = input.error;
+    message.attemptCount += 1;
+    message.nextAttemptAt = input.nextAttemptAt;
+  }
+
+  async upsertPendingScheduledDeliveryAck(entry: {
+    id: number;
+    chatId: string;
+    deliveredAt: string;
+    nextAttemptAt: string;
+  }) {
+    this.pendingDeliveryAcks.set(entry.id, {
+      id: entry.id,
+      chatId: entry.chatId,
+      deliveredAt: entry.deliveredAt,
+      nextAttemptAt: entry.nextAttemptAt,
+    });
+  }
+
+  async listPendingScheduledDeliveryAcks(limit: number) {
+    return [...this.pendingDeliveryAcks.values()]
+      .sort(
+        (a, b) => a.nextAttemptAt.localeCompare(b.nextAttemptAt) || a.id - b.id,
+      )
+      .slice(0, limit)
+      .map((entry) => ({ ...entry }));
+  }
+
+  async clearPendingScheduledDeliveryAck(id: number) {
+    this.pendingDeliveryAcks.delete(id);
   }
 }
 
@@ -549,6 +687,278 @@ describe("telegram opencode relay", () => {
     expect(chatPort.sent[2]?.text).toContain(repoA);
 
     await rm(baseDir, { recursive: true, force: true });
+  });
+
+  test("queues a reminder from natural language schedule text", async () => {
+    const chatPort = new CapturingChatPort();
+    const store = new MemorySessionStore();
+    let modelCalls = 0;
+    const sendAt = new Date(Date.now() + 60_000).toISOString();
+    const model = new ScriptedModel(async () => {
+      modelCalls += 1;
+      return {
+        mode: "chat_reply",
+        confidence: 1,
+        replyText: sendAt,
+        sessionId: "ses-any",
+      };
+    });
+
+    await handleChatMessage(
+      { chatPort, modelPort: model, sessionStore: store },
+      inbound("remind me at tomorrow 7pm to Watch Eternity on Apple TV+"),
+      { defaultWorkspacePath: defaultWorkspace },
+    );
+
+    expect(modelCalls).toBe(1);
+    expect(store.scheduledMessages).toHaveLength(1);
+    expect(store.scheduledMessages[0]?.text).toBe(
+      "Watch Eternity on Apple TV+",
+    );
+    expect(chatPort.sent[0]?.text).toContain("Scheduled reminder");
+  });
+
+  test("falls back to in-memory reminders when schedule store is partial", async () => {
+    const chatPort = new CapturingChatPort();
+    const store = new MemorySessionStore();
+    const partialStore = store as MemorySessionStore;
+    const partialStoreMutable = partialStore as unknown as Record<
+      string,
+      unknown
+    >;
+    partialStoreMutable.listDueScheduledMessages = undefined;
+    partialStoreMutable.markScheduledMessageDelivered = undefined;
+    partialStoreMutable.markScheduledMessageFailed = undefined;
+
+    const sendAt = new Date(Date.now() + 60_000).toISOString();
+    const sendAtDate = new Date(sendAt);
+
+    await handleChatMessage(
+      {
+        chatPort,
+        modelPort: new ScriptedModel(async () => ({ replyText: "unused" })),
+        sessionStore: partialStore,
+      },
+      inbound(`remind me on ${sendAt} to Partial store reminder`),
+      { defaultWorkspacePath: defaultWorkspace },
+    );
+
+    expect(store.scheduledMessages).toHaveLength(0);
+    expect(chatPort.sent[0]?.text).toContain("in memory and will be lost");
+
+    await flushDueScheduledMessages(
+      {
+        chatPort,
+        modelPort: new ScriptedModel(async () => ({ replyText: "unused" })),
+        sessionStore: partialStore,
+      },
+      new Date(sendAtDate.getTime() + 1_000),
+    );
+
+    expect(chatPort.sent).toHaveLength(2);
+    expect(chatPort.sent[1]?.text).toBe("Partial store reminder");
+  });
+
+  test("delivers due scheduled reminders", async () => {
+    const chatPort = new CapturingChatPort();
+    const store = new MemorySessionStore();
+    const scheduledAt = "2026-02-13T19:00:00.000Z";
+    const messageId = await store.enqueueScheduledMessage({
+      chatId: "chat-reminder",
+      threadId: "42",
+      text: "Watch Eternity on Apple TV+",
+      sendAt: scheduledAt,
+      createdAt: "2026-02-08T00:00:00.000Z",
+    });
+
+    await flushDueScheduledMessages(
+      {
+        chatPort,
+        modelPort: new ScriptedModel(async () => ({ replyText: "unused" })),
+        sessionStore: store,
+      },
+      new Date("2026-02-13T19:01:00.000Z"),
+    );
+
+    expect(chatPort.sent).toHaveLength(1);
+    expect(chatPort.sent[0]?.chatId).toBe("chat-reminder");
+    expect(chatPort.sent[0]?.threadId).toBe("42");
+    expect(chatPort.sent[0]?.text).toBe("Watch Eternity on Apple TV+");
+
+    const delivered = store.scheduledMessages.find(
+      (item) => item.id === messageId,
+    );
+    expect(delivered?.status).toBe("sent");
+    expect(delivered?.deliveredAt).toBe("2026-02-13T19:01:00.000Z");
+  });
+
+  test("delivers root reminders without inheriting latest thread id", async () => {
+    const chatPort = new CapturingChatPort();
+    const store = new MemorySessionStore();
+    const deps = {
+      chatPort,
+      modelPort: new ScriptedModel(async () => ({ replyText: "unused" })),
+      sessionStore: store,
+    };
+
+    await handleChatMessage(
+      deps,
+      inbound("where am i", "42", "chat-reminder-root"),
+      { defaultWorkspacePath: defaultWorkspace },
+    );
+
+    const messageId = await store.enqueueScheduledMessage({
+      chatId: "chat-reminder-root",
+      threadId: null,
+      text: "Root reminder",
+      sendAt: "2000-01-01T00:00:00.000Z",
+      createdAt: "2026-02-08T00:00:00.000Z",
+    });
+
+    await flushDueScheduledMessages(deps, new Date("2026-02-13T19:01:00.000Z"));
+
+    expect(chatPort.sent).toHaveLength(2);
+    expect(chatPort.sent[0]?.threadId).toBe("42");
+    expect(chatPort.sent[1]?.chatId).toBe("chat-reminder-root");
+    expect(chatPort.sent[1]?.threadId).toBeUndefined();
+
+    const delivered = store.scheduledMessages.find(
+      (item) => item.id === messageId,
+    );
+    expect(delivered?.status).toBe("sent");
+  });
+
+  test("does not resend reminders across restart when delivery state persistence fails", async () => {
+    class FlakyDeliveredMarkStore extends MemorySessionStore {
+      markDeliveredCalls = 0;
+      markFailedCalls = 0;
+
+      override async markScheduledMessageDelivered(input: {
+        id: number;
+        deliveredAt: string;
+      }) {
+        this.markDeliveredCalls += 1;
+        if (this.markDeliveredCalls === 1) {
+          throw new Error("database busy");
+        }
+        await super.markScheduledMessageDelivered(input);
+      }
+
+      override async markScheduledMessageFailed(input: {
+        id: number;
+        error: string;
+        nextAttemptAt: string;
+      }) {
+        this.markFailedCalls += 1;
+        await super.markScheduledMessageFailed(input);
+      }
+    }
+
+    const chatPort = new CapturingChatPort();
+    const store = new FlakyDeliveredMarkStore();
+    const deps = {
+      chatPort,
+      modelPort: new ScriptedModel(async () => ({ replyText: "unused" })),
+      sessionStore: store,
+    };
+    const messageId = await store.enqueueScheduledMessage({
+      chatId: "chat-reminder-mark-fail",
+      threadId: null,
+      text: "No duplicate reminder",
+      sendAt: "2000-01-01T00:00:00.000Z",
+      createdAt: "2026-02-08T00:00:00.000Z",
+    });
+
+    await flushDueScheduledMessages(deps, new Date("2026-02-13T19:01:00.000Z"));
+
+    expect(chatPort.sent).toHaveLength(1);
+    expect(store.markDeliveredCalls).toBe(1);
+    expect(store.markFailedCalls).toBe(0);
+    const pending = store.scheduledMessages.find(
+      (item) => item.id === messageId,
+    );
+    expect(pending?.status).toBe("pending");
+    expect(pending?.attemptCount).toBe(0);
+    expect(store.pendingDeliveryAcks.size).toBe(1);
+
+    await flushDueScheduledMessages(deps, new Date("2026-02-13T19:01:01.000Z"));
+
+    expect(chatPort.sent).toHaveLength(1);
+    expect(store.markDeliveredCalls).toBe(1);
+
+    const restartedChatPort = new CapturingChatPort();
+    const restartedDeps = {
+      chatPort: restartedChatPort,
+      modelPort: new ScriptedModel(async () => ({ replyText: "unused" })),
+      sessionStore: store,
+    };
+
+    await flushDueScheduledMessages(
+      restartedDeps,
+      new Date("2026-02-13T19:02:01.000Z"),
+    );
+
+    expect(chatPort.sent).toHaveLength(1);
+    expect(restartedChatPort.sent).toHaveLength(0);
+    expect(store.markDeliveredCalls).toBe(2);
+    expect(store.pendingDeliveryAcks.size).toBe(0);
+    const delivered = store.scheduledMessages.find(
+      (item) => item.id === messageId,
+    );
+    expect(delivered?.status).toBe("sent");
+    expect(delivered?.attemptCount).toBe(0);
+  });
+
+  test("delivers reminders that become due after worker starts", async () => {
+    class DueOnSecondSweepStore extends MemorySessionStore {
+      sweeps = 0;
+
+      override async listDueScheduledMessages(input: {
+        nowIso: string;
+        limit: number;
+      }) {
+        this.sweeps += 1;
+        if (this.sweeps === 1) {
+          return [];
+        }
+        return super.listDueScheduledMessages(input);
+      }
+    }
+
+    const controller = new AbortController();
+    const chatPort = new LoopingChatPort((calls) => {
+      if (calls >= 2) {
+        controller.abort();
+      }
+    });
+    const store = new DueOnSecondSweepStore();
+    const messageId = await store.enqueueScheduledMessage({
+      chatId: "chat-reminder-late",
+      threadId: null,
+      text: "Late reminder",
+      sendAt: "2000-01-01T00:00:00.000Z",
+      createdAt: "2026-02-08T00:00:00.000Z",
+    });
+
+    await startTelegramWorker(
+      {
+        chatPort,
+        modelPort: new ScriptedModel(async () => ({ replyText: "unused" })),
+        sessionStore: store,
+      },
+      1,
+      { stopSignal: controller.signal },
+    );
+
+    expect(store.sweeps).toBeGreaterThanOrEqual(2);
+    expect(chatPort.sent).toHaveLength(1);
+    expect(chatPort.sent[0]?.chatId).toBe("chat-reminder-late");
+    expect(chatPort.sent[0]?.text).toBe("Late reminder");
+
+    const delivered = store.scheduledMessages.find(
+      (item) => item.id === messageId,
+    );
+    expect(delivered?.status).toBe("sent");
   });
 
   test("keeps separate sessions per workspace in one topic", async () => {

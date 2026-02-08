@@ -17,6 +17,13 @@ export type PendingStartupAck = {
   lastError: string | null;
 };
 
+export type PendingScheduledDeliveryAck = {
+  id: number;
+  chatId: string;
+  deliveredAt: string;
+  nextAttemptAt: string;
+};
+
 export type ScheduledMessage = {
   id: number;
   chatId: string;
@@ -205,6 +212,19 @@ export class SqliteSessionStore {
     db.exec(`
       CREATE INDEX IF NOT EXISTS scheduled_messages_due_idx
       ON scheduled_messages(status, send_at, next_attempt_at);
+    `);
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS scheduled_delivery_acks (
+        schedule_id INTEGER PRIMARY KEY,
+        chat_id TEXT NOT NULL,
+        delivered_at TEXT NOT NULL,
+        next_attempt_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+    `);
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS scheduled_delivery_acks_next_attempt_idx
+      ON scheduled_delivery_acks(next_attempt_at);
     `);
     this.db = db;
   }
@@ -589,6 +609,77 @@ export class SqliteSessionStore {
       .run();
   }
 
+  async upsertPendingScheduledDeliveryAck(
+    entry: PendingScheduledDeliveryAck,
+  ): Promise<void> {
+    this.ensureDb()
+      .query(
+        `
+          INSERT INTO scheduled_delivery_acks (
+            schedule_id,
+            chat_id,
+            delivered_at,
+            next_attempt_at,
+            updated_at
+          )
+          VALUES (
+            $schedule_id,
+            $chat_id,
+            $delivered_at,
+            $next_attempt_at,
+            $updated_at
+          )
+          ON CONFLICT(schedule_id) DO UPDATE SET
+            chat_id = excluded.chat_id,
+            delivered_at = excluded.delivered_at,
+            next_attempt_at = excluded.next_attempt_at,
+            updated_at = excluded.updated_at
+        `,
+      )
+      .run({
+        schedule_id: entry.id,
+        chat_id: entry.chatId,
+        delivered_at: entry.deliveredAt,
+        next_attempt_at: entry.nextAttemptAt,
+        updated_at: new Date().toISOString(),
+      });
+  }
+
+  async listPendingScheduledDeliveryAcks(
+    limit: number,
+  ): Promise<PendingScheduledDeliveryAck[]> {
+    const rows = this.ensureDb()
+      .query(
+        `
+          SELECT schedule_id, chat_id, delivered_at, next_attempt_at
+          FROM scheduled_delivery_acks
+          ORDER BY next_attempt_at ASC, schedule_id ASC
+          LIMIT $limit
+        `,
+      )
+      .all({ limit }) as Array<{
+      schedule_id: number;
+      chat_id: string;
+      delivered_at: string;
+      next_attempt_at: string;
+    }>;
+
+    return rows.map((row) => ({
+      id: row.schedule_id,
+      chatId: row.chat_id,
+      deliveredAt: row.delivered_at,
+      nextAttemptAt: row.next_attempt_at,
+    }));
+  }
+
+  async clearPendingScheduledDeliveryAck(id: number): Promise<void> {
+    this.ensureDb()
+      .query(
+        `DELETE FROM scheduled_delivery_acks WHERE schedule_id = $schedule_id`,
+      )
+      .run({ schedule_id: id });
+  }
+
   async enqueueScheduledMessage(entry: {
     chatId: string;
     threadId: string | null;
@@ -648,6 +739,11 @@ export class SqliteSessionStore {
           WHERE status = 'pending'
             AND send_at <= $now_iso
             AND (next_attempt_at IS NULL OR next_attempt_at <= $now_iso)
+            AND NOT EXISTS (
+              SELECT 1
+              FROM scheduled_delivery_acks
+              WHERE schedule_id = scheduled_messages.id
+            )
           ORDER BY send_at ASC, id ASC
           LIMIT $limit
         `,
