@@ -35,6 +35,7 @@ export class OpencodeCliModelAdapter implements ModelPort {
     const result = await this.runOpencodeSession(
       input.text,
       input.sessionId ?? null,
+      input.workspacePath,
     );
     if (result.exitCode !== 0) {
       const details = result.stderr.trim() || result.textOutput || "no output";
@@ -84,6 +85,7 @@ export class OpencodeCliModelAdapter implements ModelPort {
   private async runOpencodeSession(
     message: string,
     sessionId: string | null,
+    workspacePath?: string,
   ): Promise<SessionCommandResult> {
     const cmd = [
       this.binaryPath,
@@ -103,7 +105,7 @@ export class OpencodeCliModelAdapter implements ModelPort {
 
     const proc = Bun.spawn({
       cmd,
-      cwd: this.repoPath,
+      cwd: workspacePath ?? this.repoPath,
       stdout: "pipe",
       stderr: "pipe",
     });

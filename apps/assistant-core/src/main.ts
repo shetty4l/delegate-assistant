@@ -65,6 +65,7 @@ const boot = async () => {
         progressFirstMs: config.progressFirstMs,
         progressEveryMs: config.progressEveryMs,
         progressMaxCount: config.progressMaxCount,
+        defaultWorkspacePath: config.assistantRepoPath,
       },
     );
   } else {

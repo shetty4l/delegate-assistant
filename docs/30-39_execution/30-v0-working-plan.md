@@ -36,6 +36,10 @@ Track execution for the thin Telegram-to-OpenCode relay runtime and keep roadmap
 
 ## Next Milestones
 
+Feature planning note:
+- Reliability/ops milestones (R3+) remain active for runtime hardening.
+- Email capability milestones (R5/R6) are the next product-facing feature track and should proceed as thin wrapper slices.
+
 ### R1 - Docs and Scope Convergence
 Scope:
 - Remove stale workflow-era milestones from active plan
@@ -76,10 +80,33 @@ Exit criteria:
 - Active repository surface matches documented runtime surface
 - No ambiguous ownership of legacy workflow modules remains
 
+### R5 - Email Delegation (Read + Draft, No Send)
+Scope:
+- Accept delegated email content (forwarded by user) as conversational work input
+- Produce concise email summaries, draft reply options, and proposed action items in Telegram
+- Keep wrapper responsibilities transport-level and avoid mailbox automation in hot path
+
+Exit criteria:
+- Delegated email content can be processed end-to-end through Telegram relay turns
+- Assistant returns useful summary + draft replies without sending external messages
+- No outbound email side effects are introduced
+
+### R6 - Email Send (Approval-Gated)
+Scope:
+- Add send preview contract for outbound email drafts
+- Require explicit `Approve` decision before any send action
+- Keep approval and safety ownership primarily in OpenCode; wrapper only handles transport/state handoff
+
+Exit criteria:
+- Outbound email send requires explicit approval and is rejected otherwise
+- Deny/revise flows keep conversation continuity and do not send
+- Operator-visible logs clearly show preview, decision, and final send outcome
+
 ## Risks
 - API drift in Telegram/OpenCode transport behavior can cause relay instability
 - Legacy modules drifting unnoticed can confuse roadmap and quality signals
 - Over-expanding wrapper responsibilities can duplicate OpenCode safety ownership
+- Email provider integration and identity setup can create operational complexity if introduced too early
 
 ## Definition of Done (Per Milestone)
 - Changes keep wrapper responsibilities transport-level and minimal
@@ -103,10 +130,22 @@ Template:
 - Blockers/notes:
 
 2026-02-08
+- Completed: Added per-topic workspace switching with deterministic workspace intents and per-workspace session continuity.
+- Decisions: Kept wrapper intent handling deterministic for control-plane actions (`use repo`, `where am i`, `list repos`) and delegated all non-control conversation to OpenCode.
+- Files changed: `apps/assistant-core/src/worker.ts`, `apps/assistant-core/src/worker.test.ts`, `apps/assistant-core/src/session-store.ts`, `apps/assistant-core/src/main.ts`, `packages/ports/src/index.ts`, `packages/adapters-model-opencode-cli/src/index.ts`, `docs/20-29_architecture/20-v0-architecture-effectts.md`, `docs/30-39_execution/31-v0-implementation-blueprint.md`, `docs/30-39_execution/30-v0-working-plan.md`.
+- Blockers/notes: None.
+
+2026-02-08
 - Completed: Executed R4 boundary cleanup by removing legacy workflow-era packages that were out of the active relay runtime path.
 - Decisions: Archived-by-removal for unused modules to keep active repository surface aligned with documented runtime scope and CI/lint signals.
 - Files changed: `packages/adapters-github/package.json`, `packages/adapters-github/src/index.ts`, `packages/adapters-sqlite/package.json`, `packages/adapters-sqlite/src/index.ts`, `packages/adapters-sqlite/src/index.test.ts`, `packages/policy/package.json`, `packages/policy/src/index.ts`, `packages/audit/package.json`, `packages/audit/src/index.ts`, `docs/30-39_execution/30-v0-working-plan.md`.
 - Blockers/notes: None.
+
+2026-02-08
+- Completed: Added the next feature track for email delegation and approval-gated sending as R5/R6.
+- Decisions: Sequence email delivery in two slices (`read+draft` first, `send` second) to preserve thin runtime scope and explicit approval guarantees.
+- Files changed: `docs/30-39_execution/30-v0-working-plan.md`, `docs/10-19_product/10-v0-requirements.md`, `docs/20-29_architecture/20-v0-architecture-effectts.md`, `docs/00-09_meta/00-index.md`.
+- Blockers/notes: Provider choice and assistant mailbox identity setup remain deferred prerequisites for implementation.
 
 2026-02-08
 - Completed: Aligned active working plan to the thin relay runtime and replaced stale workflow-era milestones with relay-native milestones (R1-R4).

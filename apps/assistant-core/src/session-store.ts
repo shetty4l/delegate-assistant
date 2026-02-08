@@ -33,8 +33,27 @@ export class SqliteSessionStore {
       );
     `);
     db.exec(`
+      CREATE TABLE IF NOT EXISTS topic_workspace_bindings (
+        topic_key TEXT PRIMARY KEY,
+        active_workspace_path TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+    `);
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS topic_workspace_history (
+        topic_key TEXT NOT NULL,
+        workspace_path TEXT NOT NULL,
+        last_used_at TEXT NOT NULL,
+        PRIMARY KEY (topic_key, workspace_path)
+      );
+    `);
+    db.exec(`
       CREATE INDEX IF NOT EXISTS session_mappings_last_used_idx
       ON session_mappings(last_used_at);
+    `);
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS workspace_history_topic_used_idx
+      ON topic_workspace_history(topic_key, last_used_at);
     `);
     this.db = db;
   }
@@ -107,6 +126,82 @@ export class SqliteSessionStore {
     this.ensureDb()
       .query(`DELETE FROM session_mappings WHERE session_key = $session_key`)
       .run({ session_key: sessionKey });
+  }
+
+  async getTopicWorkspace(topicKey: string): Promise<string | null> {
+    const row = this.ensureDb()
+      .query(
+        `
+          SELECT active_workspace_path
+          FROM topic_workspace_bindings
+          WHERE topic_key = $topic_key
+        `,
+      )
+      .get({ topic_key: topicKey }) as {
+      active_workspace_path: string;
+    } | null;
+
+    return row?.active_workspace_path ?? null;
+  }
+
+  async setTopicWorkspace(
+    topicKey: string,
+    workspacePath: string,
+    updatedAt: string,
+  ): Promise<void> {
+    this.ensureDb()
+      .query(
+        `
+          INSERT INTO topic_workspace_bindings (topic_key, active_workspace_path, updated_at)
+          VALUES ($topic_key, $active_workspace_path, $updated_at)
+          ON CONFLICT(topic_key) DO UPDATE SET
+            active_workspace_path = excluded.active_workspace_path,
+            updated_at = excluded.updated_at
+        `,
+      )
+      .run({
+        topic_key: topicKey,
+        active_workspace_path: workspacePath,
+        updated_at: updatedAt,
+      });
+
+    await this.touchTopicWorkspace(topicKey, workspacePath, updatedAt);
+  }
+
+  async touchTopicWorkspace(
+    topicKey: string,
+    workspacePath: string,
+    updatedAt: string,
+  ): Promise<void> {
+    this.ensureDb()
+      .query(
+        `
+          INSERT INTO topic_workspace_history (topic_key, workspace_path, last_used_at)
+          VALUES ($topic_key, $workspace_path, $last_used_at)
+          ON CONFLICT(topic_key, workspace_path) DO UPDATE SET
+            last_used_at = excluded.last_used_at
+        `,
+      )
+      .run({
+        topic_key: topicKey,
+        workspace_path: workspacePath,
+        last_used_at: updatedAt,
+      });
+  }
+
+  async listTopicWorkspaces(topicKey: string): Promise<string[]> {
+    const rows = this.ensureDb()
+      .query(
+        `
+          SELECT workspace_path
+          FROM topic_workspace_history
+          WHERE topic_key = $topic_key
+          ORDER BY last_used_at DESC
+        `,
+      )
+      .all({ topic_key: topicKey }) as Array<{ workspace_path: string }>;
+
+    return rows.map((row) => row.workspace_path);
   }
 
   async setCursor(cursor: number): Promise<void> {
