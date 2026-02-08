@@ -1,0 +1,8 @@
+{
+  "name": "@delegate/adapters-session-store-sqlite",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

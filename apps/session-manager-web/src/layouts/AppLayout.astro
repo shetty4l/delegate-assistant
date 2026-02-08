@@ -1,0 +1,116 @@
+---
+type Props = {
+  title: string;
+};
+
+const { title } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f4f8f5;
+        --panel: #ffffff;
+        --panel-muted: #f0f4f1;
+        --text: #17312a;
+        --muted: #55746a;
+        --line: #c8d8d0;
+        --accent: #0f7a5c;
+        --accent-soft: #dbf3ea;
+        --warn: #9e4a15;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: "Avenir Next", "Segoe UI", sans-serif;
+        color: var(--text);
+        background:
+          radial-gradient(circle at 10% 10%, #d7efe4 0%, transparent 32%),
+          radial-gradient(circle at 90% 0%, #dceaf3 0%, transparent 28%),
+          var(--bg);
+        min-height: 100vh;
+      }
+
+      .shell {
+        width: min(1120px, 92vw);
+        margin: 24px auto;
+        background: color-mix(in oklab, var(--panel) 94%, #e8f7f0 6%);
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        box-shadow: 0 10px 34px rgb(11 38 31 / 0.08);
+        overflow: hidden;
+      }
+
+      .topbar {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: center;
+        padding: 18px 20px;
+        background: linear-gradient(110deg, #ecf8f3 0%, #eef4f9 100%);
+        border-bottom: 1px solid var(--line);
+      }
+
+      .brand {
+        font-weight: 700;
+        letter-spacing: 0.02em;
+      }
+
+      .brand small {
+        display: block;
+        color: var(--muted);
+        font-size: 12px;
+        margin-top: 2px;
+      }
+
+      .content {
+        padding: 18px 20px 24px;
+      }
+
+      a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+
+      a:hover {
+        text-decoration: underline;
+      }
+
+      @media (max-width: 760px) {
+        .shell {
+          width: 96vw;
+          margin: 10px auto;
+          border-radius: 12px;
+        }
+
+        .topbar,
+        .content {
+          padding: 14px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div class="brand">
+          Session Manager
+          <small>Tailnet admin surface for OpenCode session mappings</small>
+        </div>
+      </header>
+      <section class="content">
+        <slot />
+      </section>
+    </main>
+  </body>
+</html>

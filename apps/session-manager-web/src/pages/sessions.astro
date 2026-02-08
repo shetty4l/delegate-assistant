@@ -1,0 +1,249 @@
+---
+import AppLayout from "../layouts/AppLayout.astro";
+import {
+  filtersFromUrl,
+  formatRelativeAge,
+  sessionTitle,
+} from "../lib/sessions";
+import { getSessionStore } from "../lib/store";
+
+const filters = filtersFromUrl(Astro.url);
+const store = await getSessionStore();
+const page = await store.listSessions(filters);
+const totalPages = Math.max(1, Math.ceil(page.total / page.pageSize));
+
+const queryWithPage = (targetPage: number): string => {
+  const params = new URLSearchParams(Astro.url.searchParams);
+  params.set("page", String(targetPage));
+  return `/sessions?${params.toString()}`;
+};
+---
+
+<AppLayout title="Session Manager">
+  <style>
+    .controls {
+      display: grid;
+      grid-template-columns: 1.4fr 0.8fr 0.8fr auto;
+      gap: 10px;
+      margin-bottom: 14px;
+      align-items: end;
+    }
+
+    .field {
+      display: grid;
+      gap: 6px;
+    }
+
+    label {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    input,
+    select {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px 12px;
+      background: var(--panel);
+      color: var(--text);
+    }
+
+    button {
+      border: 1px solid var(--accent);
+      background: var(--accent);
+      color: white;
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .meta {
+      margin-bottom: 10px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    th,
+    td {
+      text-align: left;
+      padding: 11px 10px;
+      border-bottom: 1px solid var(--line);
+      font-size: 14px;
+      vertical-align: top;
+    }
+
+    th {
+      background: var(--panel-muted);
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+
+    .status {
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+
+    .status.active {
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+
+    .status.stale {
+      background: #faeee3;
+      color: var(--warn);
+    }
+
+    .pager {
+      margin-top: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      font-size: 14px;
+      color: var(--muted);
+    }
+
+    .pager a {
+      padding: 6px 9px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: var(--panel);
+    }
+
+    .mono {
+      font-family: "SF Mono", Menlo, monospace;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    @media (max-width: 900px) {
+      .controls {
+        grid-template-columns: 1fr;
+      }
+
+      table,
+      thead,
+      tbody,
+      th,
+      td,
+      tr {
+        display: block;
+      }
+
+      thead {
+        display: none;
+      }
+
+      tr {
+        border-bottom: 1px solid var(--line);
+        padding: 8px;
+      }
+
+      td {
+        border: none;
+        padding: 4px 0;
+      }
+    }
+  </style>
+
+  <form class="controls" method="get" action="/sessions">
+    <div class="field">
+      <label for="q">Search</label>
+      <input
+        id="q"
+        name="q"
+        value={filters.q ?? ""}
+        placeholder="topic, workspace, OpenCode session id"
+      />
+    </div>
+    <div class="field">
+      <label for="status">Status</label>
+      <select id="status" name="status">
+        <option value="">all</option>
+        <option value="active" selected={filters.status === "active"}>active</option>
+        <option value="stale" selected={filters.status === "stale"}>stale</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="pageSize">Page Size</label>
+      <select id="pageSize" name="pageSize">
+        <option value="25" selected={page.pageSize === 25}>25</option>
+        <option value="50" selected={page.pageSize === 50}>50</option>
+        <option value="100" selected={page.pageSize === 100}>100</option>
+      </select>
+    </div>
+    <button type="submit">Apply Filters</button>
+  </form>
+
+  <p class="meta">
+    Showing {page.items.length} of {page.total} sessions. Page {page.page} of {totalPages}.
+  </p>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Status</th>
+        <th>Topic</th>
+        <th>Workspace</th>
+        <th>OpenCode Session</th>
+        <th>Last Used</th>
+        <th>Details</th>
+      </tr>
+    </thead>
+    <tbody>
+      {
+        page.items.map((item) => (
+          <tr>
+            <td>
+              <span class={`status ${item.status}`}>{item.status}</span>
+            </td>
+            <td>{sessionTitle(item)}</td>
+            <td class="mono">{item.workspacePath}</td>
+            <td class="mono">{item.opencodeSessionId}</td>
+            <td>{formatRelativeAge(item.lastUsedAt)}</td>
+            <td>
+              <a href={`/sessions/${item.id}`}>open</a>
+            </td>
+          </tr>
+        ))
+      }
+    </tbody>
+  </table>
+
+  <nav class="pager" aria-label="Pagination">
+    <div>
+      {
+        page.page > 1 ? <a href={queryWithPage(page.page - 1)}>Previous</a> : <span>Previous</span>
+      }
+    </div>
+    <div>
+      {
+        page.page < totalPages ? <a href={queryWithPage(page.page + 1)}>Next</a> : <span>Next</span>
+      }
+    </div>
+  </nav>
+</AppLayout>
