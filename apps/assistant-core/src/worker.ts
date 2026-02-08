@@ -246,6 +246,10 @@ type WorkspaceIntent =
   | { kind: "version" }
   | { kind: "none" };
 
+const SYNC_MAIN_COMMAND = "/sync-main";
+const SYNC_MAIN_PROMPT =
+  "Merged. Go back to main, rebase from origin and confirm.";
+
 const parseWorkspaceIntent = (text: string): WorkspaceIntent => {
   const trimmed = text.trim();
   const useMatch = /^use\s+repo\s+(.+)$/i.exec(trimmed);
@@ -266,6 +270,14 @@ const parseWorkspaceIntent = (text: string): WorkspaceIntent => {
 
 const isRestartIntent = (text: string): boolean =>
   /^(restart assistant|restart)$/i.test(text.trim());
+
+const expandSlashCommand = (text: string): string => {
+  const trimmed = text.trim();
+  if (trimmed.toLowerCase() === SYNC_MAIN_COMMAND) {
+    return SYNC_MAIN_PROMPT;
+  }
+  return text;
+};
 
 const classifyRelayError = (error: unknown): RelayErrorClass => {
   const text = String(error).toLowerCase();
@@ -555,6 +567,8 @@ export const handleChatMessage = async (
     return;
   }
 
+  const relayText = expandSlashCommand(message.text);
+
   if (isRestartIntent(message.text)) {
     await sendMessage(
       deps.chatPort,
@@ -684,7 +698,7 @@ export const handleChatMessage = async (
   const baseInput = {
     chatId: message.chatId,
     threadId: message.threadId ?? null,
-    text: message.text,
+    text: relayText,
     context: [] as string[],
     pendingProposalWorkItemId: null,
     workspacePath: activeWorkspacePath,
