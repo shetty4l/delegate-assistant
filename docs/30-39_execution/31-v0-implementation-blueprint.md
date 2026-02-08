@@ -7,8 +7,8 @@ This blueprint defines the current lightweight runtime: Telegram as transport, O
 ## 1. Runtime Shape
 
 - Telegram receives user messages.
-- Assistant runtime maps each message to a session key.
-- Runtime relays text to OpenCode (`run --attach`, with `--session` when known).
+- Assistant runtime maps each message to topic key and active workspace.
+- Runtime relays text to OpenCode (`run --attach`, with `--session` when known) using `cwd=activeWorkspacePath`.
 - OpenCode response is relayed back to the same Telegram chat/topic.
 
 No wrapper-side planning, approval workflow, or PR orchestration is in the hot path.
@@ -16,20 +16,30 @@ No wrapper-side planning, approval workflow, or PR orchestration is in the hot p
 ## 2. Session Continuity Contract
 
 Session key:
-- `sessionKey = chatId + ":" + (threadId || "root")`
+- `topicKey = chatId + ":" + (threadId || "root")`
+- `sessionKey = JSON.stringify([topicKey, workspacePath])`
 
 Persistence:
-- Store `sessionKey -> opencodeSessionId`
+- Store `(topicKey, workspacePath) -> opencodeSessionId`
 - Store `lastUsedAt`
 - Store status (`active|stale`)
 - Persist Telegram polling cursor
+- Store `topicKey -> activeWorkspacePath`
+- Store per-topic workspace history
 
 Behavior:
+- Resolve active workspace per topic before each relay turn
 - On message: try persisted/memory session id first
 - If `session_invalid` occurs: mark stale, retry once without session id
 - If `timeout` or transport errors occur: keep mapping and return a user-visible failure
 - Persist returned `sessionID` from OpenCode JSON events
 - Send progress updates for long-running turns while waiting
+
+Deterministic workspace intents:
+- `use repo <path>`: validates path and switches active workspace for current topic
+- `where am i` / `pwd`: reports current active workspace
+- `list repos` / `repos`: reports known workspaces for current topic
+- Non-matching text continues through normal OpenCode relay path
 
 Defaults:
 - idle timeout: 45m
@@ -54,6 +64,7 @@ Inbound:
 - `/start` is handled only for the first message in a chat.
 - Later `/start` messages are ignored.
 - All other text is relayed to OpenCode.
+- Workspace-intent commands are handled wrapper-side before relay.
 
 Topics:
 - `message_thread_id` is captured as `threadId`.
@@ -120,6 +131,8 @@ Legacy workflow-oriented modules may remain in the repository but are not part o
 ## 8. Acceptance Checks
 
 - DM and topic messages create/continue independent OpenCode sessions.
+- One topic can switch between multiple workspaces while preserving per-workspace session continuity.
+- Workspace intents (`use repo`, `where am i`, `list repos`) are deterministic and never delegated to model interpretation.
 - Restarting assistant runtime preserves session continuity via persisted mapping.
 - If OpenCode server is down, runtime auto-starts it and resumes service.
 - If a resumed session is stale, one retry with fresh session succeeds or user gets immediate outage message.

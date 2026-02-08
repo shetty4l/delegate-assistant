@@ -21,6 +21,7 @@ export type RespondInput = {
   context: string[];
   pendingProposalWorkItemId: string | null;
   sessionId?: string | null;
+  workspacePath?: string;
 };
 
 export interface ModelPort {

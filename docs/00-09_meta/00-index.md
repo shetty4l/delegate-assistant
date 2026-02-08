@@ -6,9 +6,15 @@ Knowledge Index (Johnny Decimal)
 - Telegram <-> OpenCode relay runtime: active
 - Topic-aware session continuity (`chatId:threadId`): active
 - Persistent session/cursor store: active
+- Topic workspace switching with per-workspace session continuity: active
 - OpenCode auto-start (`opencode serve`) + attach flow: active
 - Minimal ops surface (`/health`, `/ready`): active
 - CI quality gate is active: `bun run verify`
+
+## Planned Next Capability
+- Email delegation via forwarded content: summary + draft replies in Telegram
+- Approval-gated email sending as a follow-up slice
+- Canonical feature sequencing is tracked in `docs/30-39_execution/30-v0-working-plan.md`
 
 ## Active Runtime Surface
 - `apps/assistant-core/src/main.ts`

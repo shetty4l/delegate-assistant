@@ -1,3 +1,5 @@
+import { existsSync, statSync } from "node:fs";
+import { isAbsolute, resolve } from "node:path";
 import type { InboundMessage } from "@delegate/domain";
 import type { ChatPort, ModelPort } from "@delegate/ports";
 
@@ -22,6 +24,18 @@ type SessionStoreLike = {
   markStale(sessionKey: string, updatedAt: string): Promise<void>;
   getCursor(): Promise<number | null>;
   setCursor(cursor: number): Promise<void>;
+  getTopicWorkspace?(topicKey: string): Promise<string | null>;
+  setTopicWorkspace?(
+    topicKey: string,
+    workspacePath: string,
+    updatedAt: string,
+  ): Promise<void>;
+  listTopicWorkspaces?(topicKey: string): Promise<string[]>;
+  touchTopicWorkspace?(
+    topicKey: string,
+    workspacePath: string,
+    updatedAt: string,
+  ): Promise<void>;
 };
 
 type WorkerDeps = {
@@ -38,6 +52,7 @@ type WorkerOptions = {
   progressFirstMs?: number;
   progressEveryMs?: number;
   progressMaxCount?: number;
+  defaultWorkspacePath?: string;
 };
 
 type LogFields = Record<string, string | number | boolean | null>;
@@ -54,6 +69,8 @@ const sessionByKey = new Map<
   { sessionId: string; lastUsedAt: number }
 >();
 const lastThreadIdByChatId = new Map<string, string | null>();
+const activeWorkspaceByTopicKey = new Map<string, string>();
+const workspaceHistoryByTopicKey = new Map<string, Set<string>>();
 
 const logInfo = (event: string, fields: LogFields = {}): void => {
   console.log(
@@ -93,8 +110,133 @@ const sendMessage = async (
   });
 };
 
-const buildSessionKey = (message: InboundMessage): string =>
+const buildTopicKey = (message: InboundMessage): string =>
   `${message.chatId}:${message.threadId ?? "root"}`;
+
+const buildSessionKey = (topicKey: string, workspacePath: string): string =>
+  JSON.stringify([topicKey, workspacePath]);
+
+const normalizeWorkspacePath = (
+  rawInput: string,
+  basePath: string,
+): string | null => {
+  const trimmed = rawInput.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const unquoted =
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+      ? trimmed.slice(1, -1).trim()
+      : trimmed;
+  if (!unquoted) {
+    return null;
+  }
+
+  return isAbsolute(unquoted) ? resolve(unquoted) : resolve(basePath, unquoted);
+};
+
+const isDirectoryPath = (path: string): boolean => {
+  if (!existsSync(path)) {
+    return false;
+  }
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+};
+
+const rememberWorkspace = (topicKey: string, workspacePath: string): void => {
+  const known = workspaceHistoryByTopicKey.get(topicKey) ?? new Set<string>();
+  known.add(workspacePath);
+  workspaceHistoryByTopicKey.set(topicKey, known);
+};
+
+const loadActiveWorkspace = async (
+  deps: WorkerDeps,
+  topicKey: string,
+  defaultWorkspacePath: string,
+): Promise<string> => {
+  const inMemory = activeWorkspaceByTopicKey.get(topicKey);
+  if (inMemory) {
+    rememberWorkspace(topicKey, inMemory);
+    return inMemory;
+  }
+
+  const fromStore = deps.sessionStore?.getTopicWorkspace
+    ? await deps.sessionStore.getTopicWorkspace(topicKey)
+    : null;
+  const resolved = fromStore ?? defaultWorkspacePath;
+  activeWorkspaceByTopicKey.set(topicKey, resolved);
+  rememberWorkspace(topicKey, resolved);
+  if (deps.sessionStore?.touchTopicWorkspace) {
+    await deps.sessionStore.touchTopicWorkspace(topicKey, resolved, nowIso());
+  }
+  return resolved;
+};
+
+const setActiveWorkspace = async (
+  deps: WorkerDeps,
+  topicKey: string,
+  workspacePath: string,
+): Promise<void> => {
+  activeWorkspaceByTopicKey.set(topicKey, workspacePath);
+  rememberWorkspace(topicKey, workspacePath);
+  const timestamp = nowIso();
+  if (deps.sessionStore?.setTopicWorkspace) {
+    await deps.sessionStore.setTopicWorkspace(
+      topicKey,
+      workspacePath,
+      timestamp,
+    );
+  }
+  if (deps.sessionStore?.touchTopicWorkspace) {
+    await deps.sessionStore.touchTopicWorkspace(
+      topicKey,
+      workspacePath,
+      timestamp,
+    );
+  }
+};
+
+const listKnownWorkspaces = async (
+  deps: WorkerDeps,
+  topicKey: string,
+  activeWorkspacePath: string,
+): Promise<string[]> => {
+  const known = new Set<string>([activeWorkspacePath]);
+  for (const item of workspaceHistoryByTopicKey.get(topicKey) ?? []) {
+    known.add(item);
+  }
+  if (deps.sessionStore?.listTopicWorkspaces) {
+    for (const item of await deps.sessionStore.listTopicWorkspaces(topicKey)) {
+      known.add(item);
+    }
+  }
+  return [...known].sort((a, b) => a.localeCompare(b));
+};
+
+type WorkspaceIntent =
+  | { kind: "use_repo"; rawPath: string }
+  | { kind: "where_am_i" }
+  | { kind: "list_repos" }
+  | { kind: "none" };
+
+const parseWorkspaceIntent = (text: string): WorkspaceIntent => {
+  const trimmed = text.trim();
+  const useMatch = /^use\s+repo\s+(.+)$/i.exec(trimmed);
+  if (useMatch) {
+    return { kind: "use_repo", rawPath: useMatch[1] ?? "" };
+  }
+  if (/^(where\s+am\s+i|pwd)$/i.test(trimmed)) {
+    return { kind: "where_am_i" };
+  }
+  if (/^(list\s+repos|repos)$/i.test(trimmed)) {
+    return { kind: "list_repos" };
+  }
+  return { kind: "none" };
+};
 
 const classifyRelayError = (error: unknown): RelayErrorClass => {
   const text = String(error).toLowerCase();
@@ -298,6 +440,9 @@ export const handleChatMessage = async (
   const progressFirstMs = options.progressFirstMs ?? 10_000;
   const progressEveryMs = options.progressEveryMs ?? 30_000;
   const progressMaxCount = options.progressMaxCount ?? 3;
+  const defaultWorkspacePath = resolve(
+    options.defaultWorkspacePath ?? process.cwd(),
+  );
 
   await evictIdleSessions(deps, sessionIdleTimeoutMs, sessionMaxConcurrent);
 
@@ -326,13 +471,94 @@ export const handleChatMessage = async (
     return;
   }
 
-  const sessionKey = buildSessionKey(message);
+  const topicKey = buildTopicKey(message);
+  const activeWorkspacePath = await loadActiveWorkspace(
+    deps,
+    topicKey,
+    defaultWorkspacePath,
+  );
+
+  const intent = parseWorkspaceIntent(message.text);
+  if (intent.kind === "where_am_i") {
+    await sendMessage(
+      deps.chatPort,
+      {
+        chatId: message.chatId,
+        threadId: message.threadId ?? null,
+        text: `Current workspace: ${activeWorkspacePath}`,
+      },
+      { action: "workspace", stage: "where", topicKey },
+    );
+    return;
+  }
+
+  if (intent.kind === "list_repos") {
+    const repos = await listKnownWorkspaces(
+      deps,
+      topicKey,
+      activeWorkspacePath,
+    );
+    const lines = repos.map((repo) =>
+      repo === activeWorkspacePath ? `* ${repo} (active)` : `* ${repo}`,
+    );
+    await sendMessage(
+      deps.chatPort,
+      {
+        chatId: message.chatId,
+        threadId: message.threadId ?? null,
+        text: `Known workspaces:\n${lines.join("\n")}`,
+      },
+      { action: "workspace", stage: "list", topicKey, count: repos.length },
+    );
+    return;
+  }
+
+  if (intent.kind === "use_repo") {
+    const normalized = normalizeWorkspacePath(
+      intent.rawPath,
+      activeWorkspacePath,
+    );
+    if (!normalized || !isDirectoryPath(normalized)) {
+      await sendMessage(
+        deps.chatPort,
+        {
+          chatId: message.chatId,
+          threadId: message.threadId ?? null,
+          text: `I couldn't switch workspace. Directory not found: ${intent.rawPath.trim() || "(empty)"}`,
+        },
+        { action: "workspace", stage: "invalid", topicKey },
+      );
+      return;
+    }
+
+    await setActiveWorkspace(deps, topicKey, normalized);
+    await sendMessage(
+      deps.chatPort,
+      {
+        chatId: message.chatId,
+        threadId: message.threadId ?? null,
+        text: `Workspace switched to ${normalized}`,
+      },
+      { action: "workspace", stage: "switched", topicKey },
+    );
+    return;
+  }
+
+  const sessionKey = buildSessionKey(topicKey, activeWorkspacePath);
+  if (deps.sessionStore?.touchTopicWorkspace) {
+    await deps.sessionStore.touchTopicWorkspace(
+      topicKey,
+      activeWorkspacePath,
+      nowIso(),
+    );
+  }
   const baseInput = {
     chatId: message.chatId,
     threadId: message.threadId ?? null,
     text: message.text,
     context: [] as string[],
     pendingProposalWorkItemId: null,
+    workspacePath: activeWorkspacePath,
   };
 
   let sessionId = await loadSessionId(deps, sessionKey);
@@ -390,6 +616,7 @@ export const handleChatMessage = async (
           attempt,
           resumedSession: sessionId !== null,
           sessionKey,
+          workspacePath: activeWorkspacePath,
         },
       );
       return;

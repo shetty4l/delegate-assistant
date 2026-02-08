@@ -66,6 +66,9 @@ This document defines what the system must do, not how it is implemented.
 - The assistant has its own email address and mailbox.
 - The assistant reads only its own mailbox by default.
 - Emails forwarded to the assistant are treated as delegated work items.
+- Delivery is phased:
+  - phase 1: delegated email interpretation and draft generation
+  - phase 2: approval-gated outbound email sending
 - The assistant may:
   - classify emails
   - draft replies
@@ -144,6 +147,7 @@ This document defines what the system must do, not how it is implemented.
 ### 9.1 Must Have
 - Telegram interaction
 - Assistant identity (email + GitHub accounts exist)
+- Forwarded-email delegation with summary and draft-reply support
 - Delegation + safety model
 - Audit logging
 - Support for self-building workflows
@@ -155,6 +159,9 @@ This document defines what the system must do, not how it is implemented.
 - Multi-user collaboration
 - Full project management system
 - Fully predefined reminder/scheduling UX (should emerge through iterative collaboration)
+
+Note:
+- "Assistant email identity exists" means credentials and account can be provisioned for delegated use; it does not imply autonomous inbox operations in v0.
 
 ## 10. Open Decisions (Deferred)
 - Assistant name / handle
