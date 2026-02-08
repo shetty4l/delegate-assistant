@@ -54,6 +54,30 @@ Guardrails:
 - Do not create manual release tags.
 - Protect `v*` tags in GitHub settings so only automation can create them.
 
+## Session Manager Web UI (Astro)
+
+`apps/session-manager-web` is a separate process that provides a read-only session
+management dashboard for OpenCode session mappings.
+
+Run locally:
+- `bun run dev:web`
+
+Endpoints:
+- UI: `http://127.0.0.1:4321/sessions`
+- API: `GET /api/sessions`, `GET /api/sessions/:id`
+
+Database path resolution order:
+- `SESSION_MANAGER_SQLITE_PATH`
+- `sqlitePath` from `DELEGATE_CONFIG_PATH` (same config used by assistant-core)
+- fallback: `~/.local/share/delegate-assistant/data/assistant.db`
+
+Tailscale exposure example:
+- `tailscale serve --bg --http=80 http://127.0.0.1:4321`
+
+Security posture:
+- Bind to localhost only.
+- Publish access through Tailscale tailnet, not public internet.
+
 ## Manage macOS user service (launchd)
 
 Use these commands to manage the local `bun run dev` LaunchAgent on macOS.

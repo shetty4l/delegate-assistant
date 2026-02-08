@@ -1,0 +1,18 @@
+{
+  "name": "@delegate/session-manager-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev --host 127.0.0.1 --port 4321",
+    "build": "astro build",
+    "preview": "astro preview --host 127.0.0.1 --port 4321",
+    "typecheck": "astro check"
+  },
+  "dependencies": {
+    "@astrojs/check": "^0.9.6",
+    "@astrojs/node": "^9.0.0",
+    "@delegate/adapters-session-store-sqlite": "workspace:*",
+    "astro": "^5.0.0",
+    "typescript": "^5.9.3"
+  }
+}

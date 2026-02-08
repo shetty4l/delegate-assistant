@@ -1,0 +1,72 @@
+---
+import AppLayout from "../../layouts/AppLayout.astro";
+import { formatRelativeAge } from "../../lib/sessions";
+import { getSessionStore } from "../../lib/store";
+
+const sessionId = Astro.params.id ?? "";
+const store = await getSessionStore();
+const item = await store.getSessionById(sessionId);
+
+if (!item) {
+  return Astro.redirect("/sessions");
+}
+---
+
+<AppLayout title="Session Detail">
+  <style>
+    .grid {
+      display: grid;
+      gap: 12px;
+    }
+
+    .row {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--panel);
+      padding: 12px;
+    }
+
+    .label {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin-bottom: 5px;
+      font-weight: 700;
+    }
+
+    .value {
+      font-family: "SF Mono", Menlo, monospace;
+      font-size: 13px;
+      word-break: break-word;
+    }
+  </style>
+
+  <p><a href="/sessions">Back to sessions</a></p>
+  <div class="grid">
+    <div class="row">
+      <div class="label">Status</div>
+      <div>{item.status}</div>
+    </div>
+    <div class="row">
+      <div class="label">Topic Key</div>
+      <div class="value">{item.topicKey}</div>
+    </div>
+    <div class="row">
+      <div class="label">Workspace</div>
+      <div class="value">{item.workspacePath}</div>
+    </div>
+    <div class="row">
+      <div class="label">OpenCode Session ID</div>
+      <div class="value">{item.opencodeSessionId}</div>
+    </div>
+    <div class="row">
+      <div class="label">Last Used</div>
+      <div>{item.lastUsedAt} ({formatRelativeAge(item.lastUsedAt)})</div>
+    </div>
+    <div class="row">
+      <div class="label">Session Key</div>
+      <div class="value">{item.sessionKey}</div>
+    </div>
+  </div>
+</AppLayout>
