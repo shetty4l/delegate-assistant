@@ -121,10 +121,33 @@ const sendMessage = async (
 ): Promise<void> => {
   const threadId =
     outbound.threadId ?? lastThreadIdByChatId.get(outbound.chatId) ?? null;
-  await chatPort.send({
+  const payload = {
     ...outbound,
     ...(threadId ? { threadId } : {}),
-  });
+  };
+
+  try {
+    await chatPort.send(payload);
+  } catch (error) {
+    const errorText = String(error);
+    const shouldRetryWithoutThread =
+      threadId !== null &&
+      errorText.includes("Telegram sendMessage failed: 400");
+    if (!shouldRetryWithoutThread) {
+      throw error;
+    }
+
+    await chatPort.send({
+      chatId: outbound.chatId,
+      text: outbound.text,
+    });
+    logInfo("chat.message.sent_retry_without_thread", {
+      chatId: outbound.chatId,
+      droppedThreadId: threadId,
+      reason: "telegram_400",
+    });
+  }
+
   logInfo("chat.message.sent", {
     chatId: outbound.chatId,
     chars: outbound.text.length,
@@ -298,6 +321,22 @@ const classifyRelayError = (error: unknown): RelayErrorClass => {
   }
 
   return "transport";
+};
+
+const buildRelayFailureText = (
+  classification: RelayErrorClass,
+  relayTimeoutMs: number,
+): string => {
+  if (classification === "timeout") {
+    return `OpenCode did not finish within ${(relayTimeoutMs / 1000).toFixed(0)}s. Please retry, or increase RELAY_TIMEOUT_MS for long-running tasks.`;
+  }
+  if (classification === "empty_output") {
+    return "OpenCode finished without user-visible output. It may have completed internal actions; check logs/artifacts and retry if you still need a summary.";
+  }
+  if (classification === "session_invalid") {
+    return "Your previous session expired. I started a fresh session; please retry this request.";
+  }
+  return "I hit a transport/delivery issue while relaying this response. Please retry now.";
 };
 
 const withTimeout = async <T>(
@@ -706,6 +745,7 @@ export const handleChatMessage = async (
 
   let sessionId = await loadSessionId(deps, sessionKey);
   let lastError: unknown = null;
+  let lastClassification: RelayErrorClass = "transport";
 
   for (let attempt = 0; attempt <= sessionRetryAttempts; attempt += 1) {
     const attemptedSessionId = sessionId;
@@ -767,6 +807,7 @@ export const handleChatMessage = async (
       lastError = error;
       const errorText = String(error);
       const classification = classifyRelayError(error);
+      lastClassification = classification;
       logError(classification === "timeout" ? "relay.timeout" : "relay.error", {
         chatId: message.chatId,
         sessionKey,
@@ -811,9 +852,14 @@ export const handleChatMessage = async (
     {
       chatId: message.chatId,
       threadId: message.threadId ?? null,
-      text: "I couldn't reach OpenCode for this request. I reset the session and you can retry now.",
+      text: buildRelayFailureText(lastClassification, relayTimeoutMs),
     },
-    { action: "relay", stage: "failed", error: String(lastError) },
+    {
+      action: "relay",
+      stage: "failed",
+      classification: lastClassification,
+      error: String(lastError),
+    },
   );
 };
 
