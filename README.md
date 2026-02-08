@@ -37,6 +37,23 @@ CI enforces strict version metadata before running the full verify pipeline.
 Run locally:
 - `bun run policy:version`
 
+## Release Automation
+
+Releases are automated via Release Please on `main`:
+
+- Workflow: `.github/workflows/release.yml`
+- Config: `release-please-config.json`
+- Manifest: `.release-please-manifest.json`
+
+Flow:
+- Push/merge to `main` triggers release readiness checks (`policy:version` + `verify`).
+- If releasable commits exist, Release Please opens or updates a release PR.
+- Merging that PR updates `package.json` version, updates `CHANGELOG.md`, creates a `vX.Y.Z` tag, and publishes a GitHub release.
+
+Guardrails:
+- Do not create manual release tags.
+- Protect `v*` tags in GitHub settings so only automation can create them.
+
 ## Manage macOS user service (launchd)
 
 Use these commands to manage the local `bun run dev` LaunchAgent on macOS.
