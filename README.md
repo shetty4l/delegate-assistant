@@ -3,25 +3,61 @@
 Delegate Assistant is a lightweight Telegram-to-OpenCode bridge.
 
 The runtime is intentionally thin:
-- Telegram is the chat interface.
+- Telegram is chat interface.
 - OpenCode handles execution behavior and safety controls.
 - This wrapper handles message relay, topic-aware session continuity, and basic service health.
+
+## Code Organization
+
+Clean hexagonal architecture with workspace aliases:
+- **6 active packages** (removed 4 empty packages)
+- **Workspace aliases** for clean imports across modules
+- **Test separation** with `src/` (production) and `tests/` directories
+- **File size targets**: 200-250 LOC max (current refactoring in R7.A/R7.B)
+
+**Current Runtime Entry Points:**
+- `apps/assistant-core/src/main.ts` (443 LOC → target 200 LOC)
+- `apps/assistant-core/src/worker.ts` (996 LOC → target 150 LOC)
+- `apps/assistant-core/src/http.ts` (115 LOC)
+- `apps/assistant-core/src/session-store.ts` (SQLite adapter, 570 LOC → target 40 LOC facade)
+- `packages/adapters-telegram/src/index.ts`
+- `packages/adapters-model-opencode-cli/src/index.ts`
+- `packages/adapters-session-store-sqlite/src/index.ts` (repository pattern planned)
 
 ## Current Status
 
 Design docs are in `docs/`:
 - `docs/00-09_meta/00-index.md` (start here)
 - `docs/10-19_product/10-v0-requirements.md`
-- `docs/20-29_architecture/20-v0-architecture-effectts.md`
-- `docs/30-39_execution/30-v0-working-plan.md`
-- `docs/30-39_execution/31-v0-implementation-blueprint.md`
+- `docs/20-29_architecture/20-v0-architecture.md` (hexagonal patterns, workspace aliases)
+- `docs/30-39_execution/30-v0-working-plan.md` (includes R7.A/R7.B refactoring roadmap)
+- `docs/30-39_execution/31-v0-implementation-blueprint.md` (service composition patterns)
 
-Current runtime entrypoints:
-- `apps/assistant-core/src/main.ts`
-- `apps/assistant-core/src/worker.ts`
-- `apps/assistant-core/src/session-store.ts`
-- `packages/adapters-telegram/src/index.ts`
-- `packages/adapters-model-opencode-cli/src/index.ts`
+## Development Commands
+
+```bash
+# Development
+bun run dev                # Start assistant with supervisor
+bun run dev:web             # Start session manager UI
+
+# Quality Gates
+bun run validate             # Run all checks (test, build, lint, format)
+bun run test                 # Run tests (42 tests passing)
+bun run test:coverage        # Test coverage
+
+# Configuration
+bun run policy:version       # Validate version metadata
+```
+
+## Quality Status
+
+✅ **All checks passing**
+- 42 tests pass
+- TypeScript compilation (strict mode)
+- Bundle size: 60.72 KB
+- Linting: 0 warnings
+- Format checking: passes
+- Documentation checking: passes
 
 ## Version Policy
 

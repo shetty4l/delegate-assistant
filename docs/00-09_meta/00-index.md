@@ -40,7 +40,13 @@ Knowledge Index (Johnny Decimal)
 - `docs/10-19_product/10-v0-requirements.md` - v0 product requirements and scope boundaries
 
 ## 20-29 Architecture
-- `docs/20-29_architecture/20-v0-architecture-effectts.md` - v0 Telegram-topic to OpenCode session bridge architecture
+- `docs/20-29_architecture/20-v0-architecture.md` - v0 Telegram-topic to OpenCode session bridge architecture (hexagonal patterns, workspace aliases)
+
+## Package Structure Optimization
+- Cleaned up package structure from 10 to 6 active packages
+- Removed 4 empty packages: adapters-github, adapters-sqlite, audit, policy
+- Implemented workspace aliases for clean imports across packages
+- Separated source and test code into src/ and tests/ directories
 
 ## 30-39 Execution
 - `docs/30-39_execution/30-v0-working-plan.md` - active implementation plan and progress log

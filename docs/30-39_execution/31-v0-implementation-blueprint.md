@@ -143,3 +143,70 @@ Legacy workflow-oriented modules may remain in the repository but are not part o
 - If OpenCode server is down, runtime auto-starts it and resumes service.
 - If a resumed session is stale, one retry with fresh session succeeds or user gets immediate outage message.
 - `bun run verify` passes.
+
+## 4. Service Composition Patterns (R7.B Reference)
+
+**High-Level Service Architecture:**
+```
+apps/assistant-core/src/
+├── primitives/           # Atomic operations (~150-200 LOC each)
+│   ├── time.ts          # sleep(), nowIso()
+│   ├── keys.ts          # buildTopicKey(), buildSessionKey()
+│   ├── commands.ts      # isRestartIntent(), expandSlashCommand()
+│   ├── execution.ts     # withTimeout(), runWithProgress()
+│   ├── errors.ts        # classifyRelayError(), buildRelayFailureText()
+│   └── git/            # Git operation primitives
+├── services/            # Business logic layer (~150-200 LOC each)
+│   ├── command-service.ts     # Command processing & routing
+│   ├── session-service.ts     # Session lifecycle management
+│   ├── workspace-service.ts    # Workspace resolution & history
+│   ├── messaging-service.ts    # Message sending with retries
+│   └── relay-service.ts       # Relay execution orchestration
+├── composition/         # Dependency injection (~100 LOC each)
+│   ├── worker-factory.ts        # Wire up worker services
+│   ├── session-factory.ts       # Wire up session services
+│   └── relay-factory.ts        # Wire up relay services
+└── config/              # Feature-specific configuration (~40-80 LOC each)
+    ├── base-config.ts           # Core infrastructure
+    ├── session-config.ts        # Session management
+    ├── relay-config.ts          # Relay/execution
+    ├── worker-config.ts         # Worker-specific
+    └── defaults/               # Environment presets
+```
+
+**Service Pattern Example:**
+```typescript
+// services/command-service.ts
+export class CommandService {
+  isRestartIntent(text: string): boolean
+  expandSlashCommand(text: string): string
+  isSlashCommand(text: string): boolean
+  handleSpecialCommands(message, context): Promise<boolean>
+}
+```
+
+**Configuration Module Pattern:**
+```typescript
+// config/session-config.ts
+export const sessionConfig: SessionConfig = {
+  maxIdleMinutes: 30,
+  evictionIntervalMs: 300_000,
+  persistenceBatchSize: 50
+}
+```
+
+**Dependency Injection Pattern:**
+```typescript
+// composition/worker-factory.ts
+export const createWorkerDeps = (): WorkerDeps => ({
+  sessionService: new SessionService(sessionConfig, sessionRepository),
+  commandService: new CommandService(),
+  relayService: new RelayService(modelConfig, progressConfig)
+})
+```
+
+**Refactoring Targets:**
+- worker.ts: 996 LOC → ~150 LOC orchestration
+- session-store/index.ts: 570 LOC → ~40 LOC facade + repository pattern
+- main.ts: 443 LOC → ~200 LOC bootstrap
+- All files target 200-250 LOC maximum

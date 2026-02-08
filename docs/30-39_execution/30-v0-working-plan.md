@@ -102,6 +102,32 @@ Exit criteria:
 - Deny/revise flows keep conversation continuity and do not send
 - Operator-visible logs clearly show preview, decision, and final send outcome
 
+### R7.A - Core Primitives Extraction
+Scope:
+- Extract atomic operations from oversized files into `primitives/` directory
+- Break down `worker.ts` (996 LOC → ~150 LOC)
+- Create `services/` layer for business logic separation
+- Target 200-250 LOC per file across codebase
+
+Exit criteria:
+- `worker.ts` reduced to ~150 LOC orchestration only
+- `primitives/` directory with 5-6 atomic operation files
+- All functions under 200 LOC, target 150 LOC average
+- Workspace aliases resolve correctly in IDE
+
+### R7.B - Service Composition & Configuration
+Scope:
+- Implement dependency injection layer with service composition
+- Split monolithic config into feature-specific modules
+- Refactor SQLite adapter (570 LOC → repository pattern)
+- Create composition layer for clean service wiring
+
+Exit criteria:
+- Configuration split into 5-6 focused modules (~40-80 LOC each)
+- SQLite adapter follows repository pattern with clear separation
+- All tests pass with new structure
+- Bundle size unchanged (no added dependencies)
+
 ## Risks
 - API drift in Telegram/OpenCode transport behavior can cause relay instability
 - Legacy modules drifting unnoticed can confuse roadmap and quality signals
@@ -176,3 +202,14 @@ Template:
 - Decisions: Timeout no longer implies stale session; only `session_invalid` errors trigger stale-mark + fresh-session retry; relay sends periodic progress updates (10s then every 30s, max 3) and keeps a 5-minute default timeout.
 - Files changed: `apps/assistant-core/src/worker.ts`, `apps/assistant-core/src/worker.test.ts`, `packages/adapters-model-opencode-cli/src/index.ts`, `apps/assistant-core/src/config.ts`, `apps/assistant-core/src/main.ts`, `apps/assistant-core/src/http.test.ts`, `config/config.example.json`, `docs/30-39_execution/31-v0-implementation-blueprint.md`, `docs/30-39_execution/30-v0-working-plan.md`.
 - Blockers/notes: Long-running model turns still serialize per chat update in a single worker loop; queue parallelism by chat/thread can be considered in a future optimization pass.
+
+2026-02-08 - Architecture and Code Organization Improvements
+- Completed: Comprehensive codebase cleanup and organization improvements. Removed 4 empty packages (adapters-github, adapters-sqlite, audit, policy), implemented workspace aliases for clean imports, separated source and test code into src/ and tests/ directories.
+- Decisions: Adopted hexagonal architecture documentation (ports & adapters), chose not to adopt EffectTS (+25KB bundle cost, existing patterns already robust), established 200-250 LOC file size targets with R7.A/R7.B refactoring milestones.
+- Current File Size Metrics:
+  * worker.ts: 996 LOC (target: 150 LOC, -85%)
+  * session-store/index.ts: 570 LOC (target: 40 LOC facade, -93%)  
+  * main.ts: 443 LOC (target: 200 LOC, -55%)
+- Validation Results: 42 tests pass, TypeScript compiles, bundle size 60.72 KB, linting passes.
+- Files changed: All package.json files updated, tsconfig.base.json with workspace aliases, 7 test files moved to tests/ directories, docs/20-29_architecture/20-v0-architecture.md renamed and updated, docs/00-09_meta/00-index.md updated, docs/30-39_execution/30-v0-working-plan.md updated with R7.A/R7.B milestones.
+- Blockers/notes: None - codebase optimization complete and ready for next phase of service extraction.
