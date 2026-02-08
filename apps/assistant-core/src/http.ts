@@ -15,8 +15,8 @@ export const startHttpServer = ({
   config,
   sessionStore,
   modelPort,
-}: Deps): void => {
-  Bun.serve({
+}: Deps): Bun.Server<unknown> => {
+  return Bun.serve({
     port: config.port,
     fetch: async (request: Request) => {
       const url = new URL(request.url);

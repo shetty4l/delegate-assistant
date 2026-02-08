@@ -11,8 +11,8 @@ The assistant runtime is intentionally thin:
 
 ## 2. Runtime Topology
 
-- Single Bun process (`apps/assistant-core`)
-- In-process Telegram long poll worker
+- Supervisor Bun process (`apps/assistant-core`) with one managed worker child
+- In-worker Telegram long poll loop
 - Local SQLite for session mapping and Telegram cursor persistence
 - Local OpenCode server (`opencode serve`) attached via HTTP
 - Minimal HTTP endpoints for ops (`/health`, `/ready`)
@@ -82,8 +82,15 @@ Deterministic wrapper intents (control plane):
 - `use repo <path>`: switch active workspace for this topic
 - `where am i` / `pwd`: report active workspace path
 - `list repos` / `repos`: list known workspaces for this topic
+- `restart assistant` / `restart`: request graceful worker restart
 
 All other messages remain normal relay turns to OpenCode.
+
+Restart behavior:
+- worker acknowledges restart intent to chat
+- worker enters drain mode (stop polling new updates, finish in-flight turn)
+- worker exits with restart code
+- supervisor starts fresh worker process automatically
 
 ## 7. Safety Ownership
 

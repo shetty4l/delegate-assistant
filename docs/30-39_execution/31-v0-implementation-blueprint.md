@@ -10,6 +10,7 @@ This blueprint defines the current lightweight runtime: Telegram as transport, O
 - Assistant runtime maps each message to topic key and active workspace.
 - Runtime relays text to OpenCode (`run --attach`, with `--session` when known) using `cwd=activeWorkspacePath`.
 - OpenCode response is relayed back to the same Telegram chat/topic.
+- A lightweight supervisor process owns worker lifecycle and auto-restarts worker on planned restart or unexpected exit.
 
 No wrapper-side planning, approval workflow, or PR orchestration is in the hot path.
 
@@ -41,6 +42,9 @@ Deterministic workspace intents:
 - `list repos` / `repos`: reports known workspaces for current topic
 - Non-matching text continues through normal OpenCode relay path
 
+Deterministic runtime intent:
+- `restart assistant` / `restart`: acknowledges request, drains poll loop, exits worker with restart code, and lets supervisor spawn a fresh worker
+
 Defaults:
 - idle timeout: 45m
 - max concurrent in-memory session hints: 5
@@ -65,6 +69,7 @@ Inbound:
 - Later `/start` messages are ignored.
 - All other text is relayed to OpenCode.
 - Workspace-intent commands are handled wrapper-side before relay.
+- Restart-intent commands are handled wrapper-side and are never delegated to model interpretation.
 
 Topics:
 - `message_thread_id` is captured as `threadId`.
@@ -133,6 +138,7 @@ Legacy workflow-oriented modules may remain in the repository but are not part o
 - DM and topic messages create/continue independent OpenCode sessions.
 - One topic can switch between multiple workspaces while preserving per-workspace session continuity.
 - Workspace intents (`use repo`, `where am i`, `list repos`) are deterministic and never delegated to model interpretation.
+- `restart assistant` triggers graceful worker drain and auto-restart without manual process relaunch.
 - Restarting assistant runtime preserves session continuity via persisted mapping.
 - If OpenCode server is down, runtime auto-starts it and resumes service.
 - If a resumed session is stale, one retry with fresh session succeeds or user gets immediate outage message.
