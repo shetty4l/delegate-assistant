@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { ensureOpencodeServer } from "./opencode-server";
+import { ensureOpencodeServer } from "@assistant-core/src/opencode-server";
 
 describe("ensureOpencodeServer", () => {
   test("does not spawn when transport is already reachable", async () => {

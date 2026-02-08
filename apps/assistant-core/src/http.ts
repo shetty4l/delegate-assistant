@@ -1,7 +1,7 @@
+import type { AppConfig } from "@assistant-core/src/config";
+import { probeOpencodeReachability } from "@assistant-core/src/opencode-server";
+import type { BuildInfo } from "@assistant-core/src/version";
 import type { ModelPort } from "@delegate/ports";
-import type { AppConfig } from "./config";
-import { probeOpencodeReachability } from "./opencode-server";
-import type { BuildInfo } from "./version";
 
 type Deps = {
   config: AppConfig;

@@ -4,7 +4,7 @@ import {
   classifyWorkerExit,
   reclaimPortFromPriorAssistant,
   startWithPortTakeover,
-} from "./main";
+} from "@assistant-core/src/main";
 
 describe("startWithPortTakeover", () => {
   test("returns immediately when first bind succeeds", async () => {

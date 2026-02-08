@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { loadBuildInfo } from "./version";
+import { loadBuildInfo } from "@assistant-core/src/version";
 
 describe("loadBuildInfo", () => {
   test("uses package version and falls back when git is unavailable", async () => {

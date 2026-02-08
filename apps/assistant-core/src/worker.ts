@@ -1,9 +1,12 @@
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  type BuildInfo,
+  formatVersionFingerprint,
+} from "@assistant-core/src/version";
 import type { InboundMessage } from "@delegate/domain";
 import type { ChatPort, ModelPort } from "@delegate/ports";
-import { type BuildInfo, formatVersionFingerprint } from "./version";
 
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => {
