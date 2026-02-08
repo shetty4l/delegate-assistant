@@ -1,6 +1,7 @@
 export {
   decodeSessionKeyId,
   encodeSessionKeyId,
+  type PendingScheduledDeliveryAck,
   type PendingStartupAck,
   parseSessionKey,
   type SessionListFilters,
