@@ -232,10 +232,10 @@ describe("telegram opencode relay", () => {
     expect(persisted?.opencodeSessionId).toBe("ses-123");
   });
 
-  test("handles /sync-main deterministically on successful git sync", async () => {
+  test("handles /sync with explicit path deterministically on successful git sync", async () => {
     const chatPort = new CapturingChatPort();
     const store = new MemorySessionStore();
-    const baseDir = await mkdtemp(join(tmpdir(), "delegate-sync-main-"));
+    const baseDir = await mkdtemp(join(tmpdir(), "delegate-sync-"));
     const remoteRepo = join(baseDir, "remote.git");
     const localRepo = join(baseDir, "local");
     runGit(baseDir, ["init", "--bare", remoteRepo]);
@@ -261,8 +261,8 @@ describe("telegram opencode relay", () => {
 
     await handleChatMessage(
       { chatPort, modelPort: model, sessionStore: store },
-      inbound("/sync-main", null, "chat-sync-main"),
-      { defaultWorkspacePath: localRepo },
+      inbound(`/sync ${localRepo}`, null, "chat-sync"),
+      { defaultWorkspacePath: defaultWorkspace },
     );
 
     expect(modelCalls).toBe(0);
@@ -274,7 +274,31 @@ describe("telegram opencode relay", () => {
     await rm(baseDir, { recursive: true, force: true });
   });
 
-  test("returns error for /sync-main when not in a git repo", async () => {
+  test("returns error for /sync when path does not exist", async () => {
+    const chatPort = new CapturingChatPort();
+    const store = new MemorySessionStore();
+    let modelCalls = 0;
+    const model = new ScriptedModel(async () => {
+      modelCalls += 1;
+      return {
+        mode: "chat_reply",
+        confidence: 1,
+        replyText: "should-not-be-called",
+        sessionId: "ses-sync-fallback",
+      };
+    });
+
+    await handleChatMessage(
+      { chatPort, modelPort: model, sessionStore: store },
+      inbound("/sync /nonexistent/path", null, "chat-sync-invalid"),
+      { defaultWorkspacePath: defaultWorkspace },
+    );
+
+    expect(modelCalls).toBe(0);
+    expect(chatPort.sent[0]?.text).toContain("Directory not found");
+  });
+
+  test("returns error for /sync when not in a git repo", async () => {
     const chatPort = new CapturingChatPort();
     const store = new MemorySessionStore();
     let modelCalls = 0;
@@ -294,8 +318,8 @@ describe("telegram opencode relay", () => {
 
     await handleChatMessage(
       { chatPort, modelPort: model, sessionStore: store },
-      inbound("/sync-main", null, "chat-sync-main-fallback"),
-      { defaultWorkspacePath: nonRepoWorkspace },
+      inbound(`/sync ${nonRepoWorkspace}`, null, "chat-sync-not-git"),
+      { defaultWorkspacePath: defaultWorkspace },
     );
 
     expect(modelCalls).toBe(0);

@@ -1,4 +1,6 @@
-import { resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { InboundMessage } from "@delegate/domain";
 import type { ChatPort, ModelPort } from "@delegate/ports";
 import { type BuildInfo, formatVersionFingerprint } from "./version";
@@ -198,10 +200,23 @@ const loadActiveWorkspace = async (
   return resolved;
 };
 
-const SYNC_MAIN_COMMAND = "/sync-main";
-const SYNC_MAIN_PROMPT =
-  "Merged. Go back to main, rebase from origin and confirm.";
 const RESTART_COMMAND = "/restart";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+const findGitRoot = (startPath: string): string | null => {
+  let current = startPath;
+  while (current !== "/") {
+    if (existsSync(resolve(current, ".git"))) {
+      return current;
+    }
+    const parent = dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  return null;
+};
 
 const runGitCommand = (
   workspacePath: string,
@@ -312,9 +327,6 @@ const isRestartIntent = (text: string): boolean => {
 
 const expandSlashCommand = (text: string): string => {
   const trimmed = text.trim();
-  if (trimmed.toLowerCase() === SYNC_MAIN_COMMAND) {
-    return SYNC_MAIN_PROMPT;
-  }
   if (trimmed.toLowerCase() === RESTART_COMMAND) {
     return "restart assistant";
   }
@@ -681,8 +693,44 @@ export const handleChatMessage = async (
     return;
   }
 
-  if (message.text.trim() === "/sync-main") {
-    const syncResult = runSyncMainWorkflow(activeWorkspacePath);
+  if (message.text.trim().startsWith("/sync")) {
+    const parts = message.text.trim().split(/\s+/);
+    let targetPath: string | null;
+
+    if (parts.length > 1) {
+      // User provided a path: /sync <path>
+      targetPath = resolve(parts[1] ?? ".");
+      if (!existsSync(targetPath)) {
+        await sendMessage(
+          deps.chatPort,
+          {
+            chatId: message.chatId,
+            threadId: message.threadId ?? null,
+            text: `Directory not found: ${parts[1]}`,
+          },
+          { action: "runtime", stage: "sync_invalid_path" },
+        );
+        return;
+      }
+    } else {
+      // No path provided: find assistant's git root
+      const gitRoot = findGitRoot(__dirname);
+      if (!gitRoot) {
+        await sendMessage(
+          deps.chatPort,
+          {
+            chatId: message.chatId,
+            threadId: message.threadId ?? null,
+            text: "Could not find assistant's git repository. Please provide a path: /sync <path>",
+          },
+          { action: "runtime", stage: "sync_no_git_root" },
+        );
+        return;
+      }
+      targetPath = gitRoot;
+    }
+
+    const syncResult = runSyncMainWorkflow(targetPath);
     if (syncResult.ok) {
       await sendMessage(
         deps.chatPort,
@@ -702,7 +750,7 @@ export const handleChatMessage = async (
         {
           action: "runtime",
           stage: "sync_main",
-          workspacePath: activeWorkspacePath,
+          workspacePath: targetPath,
         },
       );
       return;
@@ -726,7 +774,7 @@ export const handleChatMessage = async (
       {
         chatId: message.chatId,
         threadId: message.threadId ?? null,
-        text: "Unknown slash command. Supported: /start, /restart, /version, /sync-main",
+        text: "Unknown slash command. Supported: /start, /restart, /version, /sync",
       },
       { action: "runtime", stage: "unknown_slash" },
     );
