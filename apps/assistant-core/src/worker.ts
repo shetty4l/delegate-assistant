@@ -377,6 +377,7 @@ type WorkspaceIntent =
 const SYNC_MAIN_COMMAND = "/sync-main";
 const SYNC_MAIN_PROMPT =
   "Merged. Go back to main, rebase from origin and confirm.";
+const RESTART_COMMAND = "/restart";
 
 const parseWorkspaceIntent = (text: string): WorkspaceIntent => {
   const trimmed = text.trim();
@@ -503,13 +504,21 @@ const getPersistentScheduleStore = (
   return sessionStore as SessionStoreWithPersistentScheduling;
 };
 
-const isRestartIntent = (text: string): boolean =>
-  /^(restart assistant|restart)$/i.test(text.trim());
+const isRestartIntent = (text: string): boolean => {
+  const trimmed = text.trim();
+  return (
+    /^\/restart$/i.test(trimmed) ||
+    /^(restart assistant|restart)$/i.test(trimmed)
+  );
+};
 
 const expandSlashCommand = (text: string): string => {
   const trimmed = text.trim();
   if (trimmed.toLowerCase() === SYNC_MAIN_COMMAND) {
     return SYNC_MAIN_PROMPT;
+  }
+  if (trimmed.toLowerCase() === RESTART_COMMAND) {
+    return "restart assistant";
   }
   return text;
 };
