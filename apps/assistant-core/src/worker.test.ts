@@ -14,8 +14,8 @@ import type {
   ModelPort,
   RespondInput,
 } from "@delegate/ports";
-
-import { handleChatMessage } from "./worker";
+import type { BuildInfo } from "./version";
+import { flushPendingStartupAck, handleChatMessage } from "./worker";
 
 class CapturingChatPort implements ChatPort {
   readonly sent: OutboundMessage[] = [];
@@ -26,6 +26,12 @@ class CapturingChatPort implements ChatPort {
 
   async send(message: OutboundMessage): Promise<void> {
     this.sent.push(message);
+  }
+}
+
+class FailingChatPort extends CapturingChatPort {
+  async send(_message: OutboundMessage): Promise<void> {
+    throw new Error("send failed");
   }
 }
 
@@ -49,6 +55,13 @@ class MemorySessionStore {
   readonly staleMarks: string[] = [];
   readonly topicWorkspace = new Map<string, string>();
   readonly workspaceHistory = new Map<string, Set<string>>();
+  pendingStartupAck: {
+    chatId: string;
+    threadId: string | null;
+    requestedAt: string;
+    attemptCount: number;
+    lastError: string | null;
+  } | null = null;
 
   async getSession(sessionKey: string) {
     return this.sessions.get(sessionKey) ?? null;
@@ -102,6 +115,24 @@ class MemorySessionStore {
   async listTopicWorkspaces(topicKey: string): Promise<string[]> {
     return [...(this.workspaceHistory.get(topicKey) ?? new Set<string>())];
   }
+
+  async getPendingStartupAck() {
+    return this.pendingStartupAck;
+  }
+
+  async upsertPendingStartupAck(entry: {
+    chatId: string;
+    threadId: string | null;
+    requestedAt: string;
+    attemptCount: number;
+    lastError: string | null;
+  }) {
+    this.pendingStartupAck = entry;
+  }
+
+  async clearPendingStartupAck() {
+    this.pendingStartupAck = null;
+  }
 }
 
 const inbound = (
@@ -116,6 +147,21 @@ const inbound = (
 });
 
 const defaultWorkspace = process.cwd();
+
+const buildInfoFixture: BuildInfo = {
+  service: "delegate-assistant",
+  releaseVersion: "0.1.0",
+  displayVersion: "0.1.0+abc1234",
+  gitSha: "abc1234def567890",
+  gitShortSha: "abc1234",
+  gitBranch: "main",
+  commitTitle: "add supervisor-managed graceful restart flow",
+  buildTimeUtc: "2026-02-08T00:00:00.000Z",
+  runtime: {
+    bunVersion: "1.3.8",
+    nodeCompat: "22.0.0",
+  },
+};
 
 const scopedSessionKey = (
   chatId: string,
@@ -328,6 +374,85 @@ describe("telegram opencode relay", () => {
     expect(modelCalls).toBe(0);
     expect(restartRequested).toBe(1);
     expect(chatPort.sent[0]?.text).toContain("restarting");
+    expect(store.pendingStartupAck).not.toBeNull();
+    expect(store.pendingStartupAck?.chatId).toBe("chat-restart");
+  });
+
+  test("flushes pending startup ack and clears marker", async () => {
+    const chatPort = new CapturingChatPort();
+    const store = new MemorySessionStore();
+    await store.upsertPendingStartupAck({
+      chatId: "chat-restart",
+      threadId: "42",
+      requestedAt: "2026-02-08T00:00:00.000Z",
+      attemptCount: 0,
+      lastError: null,
+    });
+
+    await flushPendingStartupAck({
+      chatPort,
+      modelPort: new ScriptedModel(async () => ({ replyText: "unused" })),
+      sessionStore: store,
+    });
+
+    expect(chatPort.sent).toHaveLength(1);
+    expect(chatPort.sent[0]?.chatId).toBe("chat-restart");
+    expect(chatPort.sent[0]?.threadId).toBe("42");
+    expect(chatPort.sent[0]?.text).toContain("Restart complete");
+    expect(store.pendingStartupAck).toBeNull();
+  });
+
+  test("retains pending startup ack when send fails", async () => {
+    const chatPort = new FailingChatPort();
+    const store = new MemorySessionStore();
+    await store.upsertPendingStartupAck({
+      chatId: "chat-restart",
+      threadId: null,
+      requestedAt: "2026-02-08T00:00:00.000Z",
+      attemptCount: 1,
+      lastError: null,
+    });
+
+    await flushPendingStartupAck({
+      chatPort,
+      modelPort: new ScriptedModel(async () => ({ replyText: "unused" })),
+      sessionStore: store,
+    });
+
+    expect(store.pendingStartupAck).not.toBeNull();
+    expect(store.pendingStartupAck?.attemptCount).toBe(2);
+    expect(store.pendingStartupAck?.lastError).toContain("send failed");
+  });
+
+  test("handles version as deterministic control intent", async () => {
+    const chatPort = new CapturingChatPort();
+    const store = new MemorySessionStore();
+    let modelCalls = 0;
+    const model = new ScriptedModel(async () => {
+      modelCalls += 1;
+      return {
+        mode: "chat_reply",
+        confidence: 1,
+        replyText: "unused",
+        sessionId: "ses-any",
+      };
+    });
+
+    await handleChatMessage(
+      { chatPort, modelPort: model, sessionStore: store },
+      inbound("version", null, "chat-version"),
+      {
+        defaultWorkspacePath: defaultWorkspace,
+        buildInfo: buildInfoFixture,
+      },
+    );
+
+    expect(modelCalls).toBe(0);
+    expect(chatPort.sent[0]?.text).toContain("0.1.0+abc1234");
+    expect(chatPort.sent[0]?.text).toContain("branch main");
+    expect(chatPort.sent[0]?.text).toContain(
+      "add supervisor-managed graceful restart flow",
+    );
   });
 
   test("handles workspace switching intents deterministically", async () => {

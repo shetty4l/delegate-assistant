@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
 import type { AppConfig } from "./config";
-import { runReadinessChecks } from "./http";
+import { runReadinessChecks, startHttpServer } from "./http";
+import type { BuildInfo } from "./version";
 
 const baseConfig = (): AppConfig => ({
   configSourcePath: "/tmp/config.json",
@@ -26,6 +27,21 @@ const baseConfig = (): AppConfig => ({
   progressEveryMs: 30_000,
   progressMaxCount: 3,
 });
+
+const buildInfoFixture: BuildInfo = {
+  service: "delegate-assistant",
+  releaseVersion: "0.1.0",
+  displayVersion: "0.1.0+abc1234",
+  gitSha: "abc1234def567890",
+  gitShortSha: "abc1234",
+  gitBranch: "main",
+  commitTitle: "add supervisor-managed graceful restart flow",
+  buildTimeUtc: "2026-02-08T00:00:00.000Z",
+  runtime: {
+    bunVersion: "1.3.8",
+    nodeCompat: "22.0.0",
+  },
+};
 
 describe("runReadinessChecks", () => {
   test("reports opencode_unreachable when transport probe fails", async () => {
@@ -94,6 +110,34 @@ describe("runReadinessChecks", () => {
         "session_store_unreachable",
         "opencode_unreachable",
       ]);
+    }
+  });
+});
+
+describe("startHttpServer", () => {
+  test("serves build metadata on /version", async () => {
+    const config = baseConfig();
+    config.port = 0;
+    const server = startHttpServer({
+      config,
+      sessionStore: { ping: async () => {} },
+      modelPort: { respond: async () => ({ replyText: "unused" }) },
+      buildInfo: buildInfoFixture,
+    });
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${server.port}/version`);
+      expect(response.status).toBe(200);
+      const payload = (await response.json()) as Record<string, unknown>;
+      expect(payload.ok).toBeTrue();
+      expect(payload.version).toBe("0.1.0");
+      expect(payload.displayVersion).toBe("0.1.0+abc1234");
+      expect(payload.gitBranch).toBe("main");
+      expect(payload.commitTitle).toBe(
+        "add supervisor-managed graceful restart flow",
+      );
+    } finally {
+      server.stop(true);
     }
   });
 });

@@ -9,6 +9,7 @@ import {
   probeOpencodeReachability,
 } from "./opencode-server";
 import { SqliteSessionStore } from "./session-store";
+import { formatVersionFingerprint, loadBuildInfo } from "./version";
 import { startTelegramWorker } from "./worker";
 
 const RESTART_EXIT_CODE = 75;
@@ -19,6 +20,7 @@ const sleep = (ms: number): Promise<void> =>
 
 const runWorkerProcess = async (): Promise<number> => {
   const config = loadConfig();
+  const buildInfo = loadBuildInfo();
   const sessionStore = new SqliteSessionStore(config.sqlitePath);
   const modelPort =
     config.modelProvider === "opencode_cli"
@@ -45,7 +47,12 @@ const runWorkerProcess = async (): Promise<number> => {
     });
   }
 
-  const server = startHttpServer({ config, sessionStore, modelPort });
+  const server = startHttpServer({
+    config,
+    sessionStore,
+    modelPort,
+    buildInfo,
+  });
   const stopController = new AbortController();
   let restartRequested = false;
   let stopping = false;
@@ -100,6 +107,7 @@ const runWorkerProcess = async (): Promise<number> => {
           progressMaxCount: config.progressMaxCount,
           defaultWorkspacePath: config.assistantRepoPath,
           stopSignal: stopController.signal,
+          buildInfo,
           onRestartRequested: async () => {
             requestStop("chat_restart", true);
           },
@@ -117,7 +125,13 @@ const runWorkerProcess = async (): Promise<number> => {
     assistantRepoPath: config.assistantRepoPath,
     opencodeAttachUrl: config.opencodeAttachUrl,
     opencodeAutoStart: config.opencodeAutoStart,
+    version: buildInfo.releaseVersion,
+    displayVersion: buildInfo.displayVersion,
+    gitSha: buildInfo.gitSha,
+    gitBranch: buildInfo.gitBranch,
+    buildTimeUtc: buildInfo.buildTimeUtc,
   });
+  console.log(`build fingerprint: ${formatVersionFingerprint(buildInfo)}`);
 
   if (telegramWorkerPromise) {
     await Promise.race([telegramWorkerPromise, stopPromise]);
