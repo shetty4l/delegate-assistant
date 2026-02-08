@@ -11,68 +11,103 @@ import {
 import { SqliteSessionStore } from "./session-store";
 import { startTelegramWorker } from "./worker";
 
-const config = loadConfig();
+const RESTART_EXIT_CODE = 75;
+const WORKER_ROLE = "worker";
 
-const sessionStore = new SqliteSessionStore(config.sqlitePath);
-const modelPort =
-  config.modelProvider === "opencode_cli"
-    ? new OpencodeCliModelAdapter({
-        binaryPath: config.opencodeBin,
-        model: config.modelName,
-        repoPath: config.assistantRepoPath,
-        attachUrl: config.opencodeAttachUrl,
-        responseTimeoutMs: config.relayTimeoutMs,
-      })
-    : new DeterministicModelStub();
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
 
-const boot = async () => {
-  try {
-    await sessionStore.init();
-  } catch (cause) {
-    throw new Error(`Failed to initialize session store: ${String(cause)}`);
-  }
+const runWorkerProcess = async (): Promise<number> => {
+  const config = loadConfig();
+  const sessionStore = new SqliteSessionStore(config.sqlitePath);
+  const modelPort =
+    config.modelProvider === "opencode_cli"
+      ? new OpencodeCliModelAdapter({
+          binaryPath: config.opencodeBin,
+          model: config.modelName,
+          repoPath: config.assistantRepoPath,
+          attachUrl: config.opencodeAttachUrl,
+          responseTimeoutMs: config.relayTimeoutMs,
+        })
+      : new DeterministicModelStub();
+
+  await sessionStore.init();
 
   if (config.modelProvider === "opencode_cli" && config.opencodeAutoStart) {
-    try {
-      await ensureOpencodeServer({
-        binaryPath: config.opencodeBin,
-        attachUrl: config.opencodeAttachUrl,
-        host: config.opencodeServeHost,
-        port: config.opencodeServePort,
-        workingDirectory: config.assistantRepoPath,
-        transportPing: async () =>
-          probeOpencodeReachability(config.opencodeAttachUrl),
-      });
-    } catch (cause) {
-      throw new Error(`Failed to ensure opencode server: ${String(cause)}`);
+    await ensureOpencodeServer({
+      binaryPath: config.opencodeBin,
+      attachUrl: config.opencodeAttachUrl,
+      host: config.opencodeServeHost,
+      port: config.opencodeServePort,
+      workingDirectory: config.assistantRepoPath,
+      transportPing: async () =>
+        probeOpencodeReachability(config.opencodeAttachUrl),
+    });
+  }
+
+  const server = startHttpServer({ config, sessionStore, modelPort });
+  const stopController = new AbortController();
+  let restartRequested = false;
+  let stopping = false;
+  let stopResolved = false;
+  let resolveStop: (() => void) | null = null;
+  const stopPromise = new Promise<void>((resolve) => {
+    resolveStop = () => {
+      if (stopResolved) {
+        return;
+      }
+      stopResolved = true;
+      resolve();
+    };
+  });
+
+  const requestStop = (reason: string, shouldRestart: boolean): void => {
+    if (stopping) {
+      return;
     }
-  }
-
-  startHttpServer({ config, sessionStore, modelPort });
-
-  if (config.telegramBotToken) {
-    const telegramPort = new TelegramLongPollingAdapter(
-      config.telegramBotToken,
+    stopping = true;
+    restartRequested = shouldRestart;
+    stopController.abort();
+    resolveStop?.();
+    console.log(
+      JSON.stringify({
+        level: "info",
+        event: "runtime.stop_requested",
+        reason,
+        shouldRestart,
+      }),
     );
-    void startTelegramWorker(
-      { chatPort: telegramPort, modelPort, sessionStore },
-      config.telegramPollIntervalMs,
-      {
-        sessionIdleTimeoutMs: config.sessionIdleTimeoutMs,
-        sessionMaxConcurrent: config.sessionMaxConcurrent,
-        sessionRetryAttempts: config.sessionRetryAttempts,
-        relayTimeoutMs: config.relayTimeoutMs,
-        progressFirstMs: config.progressFirstMs,
-        progressEveryMs: config.progressEveryMs,
-        progressMaxCount: config.progressMaxCount,
-        defaultWorkspacePath: config.assistantRepoPath,
-      },
-    );
-  } else {
-    console.log("telegram worker disabled: TELEGRAM_BOT_TOKEN is not set");
-  }
+  };
 
-  return {
+  process.on("SIGINT", () => requestStop("sigint", false));
+  process.on("SIGTERM", () => requestStop("sigterm", false));
+
+  const telegramWorkerPromise = config.telegramBotToken
+    ? startTelegramWorker(
+        {
+          chatPort: new TelegramLongPollingAdapter(config.telegramBotToken),
+          modelPort,
+          sessionStore,
+        },
+        config.telegramPollIntervalMs,
+        {
+          sessionIdleTimeoutMs: config.sessionIdleTimeoutMs,
+          sessionMaxConcurrent: config.sessionMaxConcurrent,
+          sessionRetryAttempts: config.sessionRetryAttempts,
+          relayTimeoutMs: config.relayTimeoutMs,
+          progressFirstMs: config.progressFirstMs,
+          progressEveryMs: config.progressEveryMs,
+          progressMaxCount: config.progressMaxCount,
+          defaultWorkspacePath: config.assistantRepoPath,
+          stopSignal: stopController.signal,
+          onRestartRequested: async () => {
+            requestStop("chat_restart", true);
+          },
+        },
+      )
+    : null;
+
+  console.log("assistant worker booted", {
     configSourcePath: config.configSourcePath,
     envOverridesApplied: config.envOverridesApplied,
     port: config.port,
@@ -82,16 +117,101 @@ const boot = async () => {
     assistantRepoPath: config.assistantRepoPath,
     opencodeAttachUrl: config.opencodeAttachUrl,
     opencodeAutoStart: config.opencodeAutoStart,
-    sessionIdleTimeoutMs: config.sessionIdleTimeoutMs,
-    sessionMaxConcurrent: config.sessionMaxConcurrent,
-    sessionRetryAttempts: config.sessionRetryAttempts,
-    relayTimeoutMs: config.relayTimeoutMs,
-    progressFirstMs: config.progressFirstMs,
-    progressEveryMs: config.progressEveryMs,
-    progressMaxCount: config.progressMaxCount,
-  };
+  });
+
+  if (telegramWorkerPromise) {
+    await Promise.race([telegramWorkerPromise, stopPromise]);
+  } else {
+    console.log("telegram worker disabled: TELEGRAM_BOT_TOKEN is not set");
+    await stopPromise;
+  }
+
+  try {
+    server.stop(true);
+  } catch {
+    // ignore stop failures on shutdown
+  }
+
+  return restartRequested ? RESTART_EXIT_CODE : 0;
 };
 
-const bootResult = await boot();
+const runSupervisor = async (): Promise<number> => {
+  const scriptPath = process.argv[1];
+  if (!scriptPath) {
+    throw new Error("Unable to resolve runtime script path for supervisor");
+  }
 
-console.log("assistant-core booted", bootResult);
+  let stopping = false;
+  let activeChild: Bun.Subprocess | null = null;
+
+  const stopChild = async (): Promise<void> => {
+    if (!activeChild) {
+      return;
+    }
+
+    try {
+      activeChild.kill("SIGTERM");
+    } catch {
+      // child may already be gone
+    }
+
+    const timedOut = await Promise.race([
+      activeChild.exited.then(() => false),
+      sleep(5_000).then(() => true),
+    ]);
+
+    if (timedOut) {
+      try {
+        activeChild.kill("SIGKILL");
+      } catch {
+        // ignore hard kill failures
+      }
+      await activeChild.exited;
+    }
+  };
+
+  process.on("SIGINT", () => {
+    stopping = true;
+  });
+  process.on("SIGTERM", () => {
+    stopping = true;
+  });
+
+  while (!stopping) {
+    activeChild = Bun.spawn({
+      cmd: [process.execPath, scriptPath],
+      env: {
+        ...process.env,
+        ASSISTANT_PROCESS_ROLE: WORKER_ROLE,
+      },
+      cwd: process.cwd(),
+      stdout: "inherit",
+      stderr: "inherit",
+      stdin: "inherit",
+    });
+
+    const code = await activeChild.exited;
+    if (stopping) {
+      break;
+    }
+
+    if (code === RESTART_EXIT_CODE) {
+      console.log("worker exited for requested restart; starting new worker");
+      continue;
+    }
+
+    console.error(
+      `worker exited unexpectedly with code ${String(code)}; restarting`,
+    );
+    await sleep(750);
+  }
+
+  await stopChild();
+  return 0;
+};
+
+const isWorkerRole = process.env.ASSISTANT_PROCESS_ROLE === WORKER_ROLE;
+const exitCode = isWorkerRole
+  ? await runWorkerProcess()
+  : await runSupervisor();
+process.exit(exitCode);

@@ -299,6 +299,37 @@ describe("telegram opencode relay", () => {
     expect(chatPort.sent[1]?.text).toBe("done");
   });
 
+  test("handles restart as deterministic control intent", async () => {
+    const chatPort = new CapturingChatPort();
+    const store = new MemorySessionStore();
+    let modelCalls = 0;
+    let restartRequested = 0;
+    const model = new ScriptedModel(async () => {
+      modelCalls += 1;
+      return {
+        mode: "chat_reply",
+        confidence: 1,
+        replyText: "unused",
+        sessionId: "ses-any",
+      };
+    });
+
+    await handleChatMessage(
+      { chatPort, modelPort: model, sessionStore: store },
+      inbound("restart assistant", null, "chat-restart"),
+      {
+        defaultWorkspacePath: defaultWorkspace,
+        onRestartRequested: async () => {
+          restartRequested += 1;
+        },
+      },
+    );
+
+    expect(modelCalls).toBe(0);
+    expect(restartRequested).toBe(1);
+    expect(chatPort.sent[0]?.text).toContain("restarting");
+  });
+
   test("handles workspace switching intents deterministically", async () => {
     const chatPort = new CapturingChatPort();
     const store = new MemorySessionStore();

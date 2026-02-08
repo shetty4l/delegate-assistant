@@ -53,6 +53,11 @@ type WorkerOptions = {
   progressEveryMs?: number;
   progressMaxCount?: number;
   defaultWorkspacePath?: string;
+  stopSignal?: AbortSignal;
+  onRestartRequested?: (input: {
+    chatId: string;
+    threadId: string | null;
+  }) => Promise<void> | void;
 };
 
 type LogFields = Record<string, string | number | boolean | null>;
@@ -237,6 +242,9 @@ const parseWorkspaceIntent = (text: string): WorkspaceIntent => {
   }
   return { kind: "none" };
 };
+
+const isRestartIntent = (text: string): boolean =>
+  /^(restart assistant|restart)$/i.test(text.trim());
 
 const classifyRelayError = (error: unknown): RelayErrorClass => {
   const text = String(error).toLowerCase();
@@ -471,6 +479,25 @@ export const handleChatMessage = async (
     return;
   }
 
+  if (isRestartIntent(message.text)) {
+    await sendMessage(
+      deps.chatPort,
+      {
+        chatId: message.chatId,
+        threadId: message.threadId ?? null,
+        text: "Acknowledged. Draining current work and restarting now.",
+      },
+      { action: "runtime", stage: "restart_requested" },
+    );
+    if (options.onRestartRequested) {
+      await options.onRestartRequested({
+        chatId: message.chatId,
+        threadId: message.threadId ?? null,
+      });
+    }
+    return;
+  }
+
   const topicKey = buildTopicKey(message);
   const activeWorkspacePath = await loadActiveWorkspace(
     deps,
@@ -686,10 +713,11 @@ export const startTelegramWorker = (
   deps: WorkerDeps,
   pollIntervalMs: number,
   options: WorkerOptions = {},
-): Promise<never> => {
+): Promise<void> => {
+  const isStopping = (): boolean => options.stopSignal?.aborted ?? false;
   let cursor: number | null = null;
 
-  const loop = async (): Promise<never> => {
+  const loop = async (): Promise<void> => {
     if (deps.sessionStore) {
       try {
         cursor = await deps.sessionStore.getCursor();
@@ -700,7 +728,7 @@ export const startTelegramWorker = (
       }
     }
 
-    while (true) {
+    while (!isStopping()) {
       try {
         const updates = await deps.chatPort.receiveUpdates(cursor);
         if (updates.length > 0) {
@@ -711,6 +739,9 @@ export const startTelegramWorker = (
         }
 
         for (const update of updates) {
+          if (isStopping()) {
+            break;
+          }
           cursor = update.updateId + 1;
           if (deps.sessionStore) {
             await deps.sessionStore.setCursor(cursor);
@@ -723,8 +754,14 @@ export const startTelegramWorker = (
         });
       }
 
+      if (isStopping()) {
+        break;
+      }
+
       await sleep(pollIntervalMs);
     }
+
+    logInfo("worker.stopped", {});
   };
 
   return loop();

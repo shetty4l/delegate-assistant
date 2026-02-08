@@ -7,6 +7,7 @@ Knowledge Index (Johnny Decimal)
 - Topic-aware session continuity (`chatId:threadId`): active
 - Persistent session/cursor store: active
 - Topic workspace switching with per-workspace session continuity: active
+- Supervisor-managed graceful worker restart: active
 - OpenCode auto-start (`opencode serve`) + attach flow: active
 - Minimal ops surface (`/health`, `/ready`): active
 - CI quality gate is active: `bun run verify`
