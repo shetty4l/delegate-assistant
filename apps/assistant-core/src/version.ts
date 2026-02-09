@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 
 type RuntimeInfo = {
   bunVersion: string;
@@ -24,44 +24,9 @@ type BuildInfoInput = {
   env?: Record<string, string | undefined>;
 };
 
+const SERVICE_NAME = "delegate-assistant";
+const DEV_VERSION = "0.0.0-dev";
 const UNKNOWN = "unknown";
-
-const readText = (value: Uint8Array<ArrayBufferLike>): string =>
-  new TextDecoder().decode(value).trim();
-
-const readGitValue = (repoRoot: string, args: string[]): string | null => {
-  const command = Bun.spawnSync({
-    cmd: ["git", ...args],
-    cwd: repoRoot,
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-
-  if (command.exitCode !== 0) {
-    return null;
-  }
-
-  const output = readText(command.stdout);
-  return output.length > 0 ? output : null;
-};
-
-const resolveRepoRoot = (): string => resolve(import.meta.dir, "../../..");
-
-const readRootPackage = (
-  repoRoot: string,
-): { name?: string; version?: string } => {
-  try {
-    const packageJsonPath = join(repoRoot, "package.json");
-    const raw = readFileSync(packageJsonPath, "utf8");
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return {};
-    }
-    return parsed as { name?: string; version?: string };
-  } catch {
-    return {};
-  }
-};
 
 const asNonEmpty = (value: string | undefined): string | null => {
   if (!value) {
@@ -78,38 +43,49 @@ const shortSha = (sha: string): string => {
   return sha.slice(0, 7);
 };
 
+const readVersionFile = (repoRoot: string): string | null => {
+  try {
+    const versionPath = join(repoRoot, "VERSION");
+    const raw = readFileSync(versionPath, "utf8").trim();
+    return raw.length > 0 ? raw : null;
+  } catch {
+    return null;
+  }
+};
+
+const resolveRepoRoot = (): string => {
+  const cwd = process.cwd();
+  try {
+    const pkg = readFileSync(join(cwd, "package.json"), "utf8");
+    const parsed = JSON.parse(pkg);
+    if (parsed?.name === SERVICE_NAME) {
+      return cwd;
+    }
+  } catch {
+    // not the repo root
+  }
+  // fallback: assume we're in apps/assistant-core or similar
+  return join(import.meta.dir, "../../..");
+};
+
 export const formatVersionFingerprint = (buildInfo: BuildInfo): string =>
-  `${buildInfo.service} ${buildInfo.displayVersion} (branch ${buildInfo.gitBranch}, built ${buildInfo.buildTimeUtc}) - ${buildInfo.commitTitle}`;
+  `${buildInfo.service} ${buildInfo.displayVersion} (branch ${buildInfo.gitBranch}, built ${buildInfo.buildTimeUtc})`;
 
 export const loadBuildInfo = (input: BuildInfoInput = {}): BuildInfo => {
   const repoRoot = input.repoRoot ?? resolveRepoRoot();
   const env = input.env ?? process.env;
   const now = input.now ?? (() => new Date());
-  const packageJson = readRootPackage(repoRoot);
 
-  const service = asNonEmpty(packageJson.name) ?? "delegate-assistant";
-  const releaseVersion = asNonEmpty(packageJson.version) ?? "0.0.0";
-  const gitSha =
-    asNonEmpty(env.GIT_SHA) ??
-    readGitValue(repoRoot, ["rev-parse", "HEAD"]) ??
-    UNKNOWN;
-  const gitBranch =
-    asNonEmpty(env.GIT_BRANCH) ??
-    readGitValue(repoRoot, ["rev-parse", "--abbrev-ref", "HEAD"]) ??
-    UNKNOWN;
-  const commitTitle =
-    asNonEmpty(env.GIT_COMMIT_TITLE) ??
-    readGitValue(repoRoot, ["log", "-1", "--pretty=%s"]) ??
-    UNKNOWN;
+  const releaseVersion = readVersionFile(repoRoot) ?? DEV_VERSION;
+  const gitSha = asNonEmpty(env.GIT_SHA) ?? UNKNOWN;
+  const gitBranch = asNonEmpty(env.GIT_BRANCH) ?? UNKNOWN;
+  const commitTitle = asNonEmpty(env.GIT_COMMIT_TITLE) ?? UNKNOWN;
   const buildTimeUtc = asNonEmpty(env.BUILD_TIME_UTC) ?? now().toISOString();
   const gitShortSha = shortSha(gitSha);
-  const displayVersion =
-    gitShortSha === UNKNOWN
-      ? releaseVersion
-      : `${releaseVersion}+${gitShortSha}`;
+  const displayVersion = releaseVersion;
 
   return {
-    service,
+    service: SERVICE_NAME,
     releaseVersion,
     displayVersion,
     gitSha,

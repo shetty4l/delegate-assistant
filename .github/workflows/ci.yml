@@ -25,12 +25,5 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Enforce version policy
-        run: |
-          export GIT_SHA="$(git rev-parse HEAD)"
-          export GIT_BRANCH="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"
-          export GIT_COMMIT_TITLE="$(git log -1 --pretty=%s)"
-          bun run policy:version
-
       - name: Verify
         run: bun run verify
