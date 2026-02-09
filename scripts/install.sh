@@ -41,7 +41,7 @@ prompt_value() {
   else
     printf '%s: ' "$prompt" >&2
   fi
-  read -r value
+  read -r value < /dev/tty
   value="${value:-$default}"
   if [ -z "$value" ]; then
     die "${var_name} is required"
@@ -145,9 +145,13 @@ setup_config() {
   info "Configuring delegate-assistant..."
   echo ""
 
-  # prompt for required values
-  local bot_token
-  bot_token=$(prompt_value "TELEGRAM_BOT_TOKEN" "Telegram bot token (required)")
+  # use env var if set, otherwise prompt interactively
+  local bot_token="${TELEGRAM_BOT_TOKEN:-}"
+  if [ -z "$bot_token" ]; then
+    bot_token=$(prompt_value "TELEGRAM_BOT_TOKEN" "Telegram bot token (required)")
+  else
+    info "Using TELEGRAM_BOT_TOKEN from environment"
+  fi
 
   # write secrets
   cat > "$SECRETS_FILE" << EOF
