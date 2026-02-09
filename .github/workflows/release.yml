@@ -1,0 +1,88 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.8
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Verify
+        run: bun run verify
+
+      - name: Compute next version
+        id: version
+        run: |
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.1.0")
+          echo "latest_tag=${LATEST_TAG}" >> "$GITHUB_OUTPUT"
+
+          # Strip 'v' prefix and split into major.minor.patch
+          VERSION="${LATEST_TAG#v}"
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+          NEXT_PATCH=$((PATCH + 1))
+          NEXT_VERSION="${MAJOR}.${MINOR}.${NEXT_PATCH}"
+          echo "next_version=${NEXT_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "next_tag=v${NEXT_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Releasing: v${NEXT_VERSION} (previous: ${LATEST_TAG})"
+
+      - name: Write VERSION file
+        run: echo "${{ steps.version.outputs.next_version }}" > VERSION
+
+      - name: Create source tarball
+        run: |
+          TAG="${{ steps.version.outputs.next_tag }}"
+          tar czf "delegate-assistant-${TAG}.tar.gz" \
+            --exclude='node_modules' \
+            --exclude='.git' \
+            --exclude='tests' \
+            --exclude='.idea' \
+            --exclude='.DS_Store' \
+            --exclude='dist' \
+            --exclude='.astro' \
+            apps/ \
+            packages/ \
+            scripts/install.sh \
+            deploy/ \
+            package.json \
+            bun.lock \
+            tsconfig.base.json \
+            biome.json \
+            .remarkrc.json \
+            VERSION
+
+      - name: Create tag and release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ steps.version.outputs.next_tag }}"
+          VERSION="${{ steps.version.outputs.next_version }}"
+
+          git tag "${TAG}"
+          git push origin "${TAG}"
+
+          gh release create "${TAG}" \
+            --title "Release ${TAG}" \
+            --notes "Automated release ${TAG}" \
+            "delegate-assistant-${TAG}.tar.gz" \
+            "scripts/install.sh"

@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "astro dev --host 127.0.0.1 --port 4321",
     "build": "astro build",
+    "start": "bun ./dist/server/entry.mjs",
     "preview": "astro preview --host 127.0.0.1 --port 4321",
     "typecheck": "astro check"
   },

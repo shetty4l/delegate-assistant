@@ -1,7 +1,6 @@
 {
   "name": "delegate-assistant",
   "private": true,
-  "version": "0.1.0",
   "type": "module",
   "workspaces": [
     "apps/*",
@@ -11,19 +10,19 @@
     "dev": "bun run --cwd apps/assistant-core dev",
     "dev:web": "bun run --cwd apps/session-manager-web dev",
     "dev:web:tailnet": "bun run scripts/dev-web-tailnet.ts",
-    "status:launch:assistant": "launchctl print gui/$(id -u)/com.suyash.delegate-assistant.dev",
-    "status:launch:web": "launchctl print gui/$(id -u)/com.suyash.delegate-session-manager.dev",
+    "start": "bun apps/assistant-core/src/main.ts",
+    "start:web": "bun run --cwd apps/session-manager-web start",
+    "status:launch:assistant": "launchctl print gui/$(id -u)/com.suyash.delegate-assistant",
+    "status:launch:web": "launchctl print gui/$(id -u)/com.suyash.delegate-session-manager",
     "typecheck": "bun run --cwd apps/assistant-core typecheck",
     "typecheck:web": "bun run --cwd apps/session-manager-web typecheck",
-    "build": "bun run --cwd apps/assistant-core build",
     "build:web": "bun run --cwd apps/session-manager-web build",
     "test": "bun test",
-    "policy:version": "bun run scripts/check-version-policy.ts",
     "lint": "oxlint apps/**/src packages/**/src --deny-warnings",
     "format": "biome check --write apps/**/src packages/**/src docs README.md .github",
     "format:check": "biome check apps/**/src packages/**/src docs README.md .github",
     "docs:check": "remark docs README.md --frail",
-    "verify": "bun run typecheck && bun run format && bun run lint && bun run format:check && bun run build && bun run test && bun run docs:check",
+    "verify": "bun run typecheck && bun run format && bun run lint && bun run format:check && bun run build:web && bun run test && bun run docs:check",
     "validate": "bun run verify"
   },
   "devDependencies": {
