@@ -83,6 +83,46 @@ describe("Semaphore", () => {
     await p4;
     expect(sem.pendingCount).toBe(0);
   });
+
+  test("rejects acquire when queue exceeds maxQueueSize", async () => {
+    const sem = new Semaphore(1, 2);
+    await sem.acquire(); // Takes the slot
+
+    // These two will queue successfully
+    const p1 = sem.acquire();
+    const p2 = sem.acquire();
+    expect(sem.pendingCount).toBe(2);
+
+    // Third queued acquire should be rejected
+    await expect(sem.acquire()).rejects.toThrow(/Semaphore queue is full/);
+
+    // Clean up
+    sem.release();
+    sem.release();
+    sem.release();
+    await Promise.all([p1, p2]);
+  });
+
+  test("uses default maxQueueSize of 100", async () => {
+    const sem = new Semaphore(1);
+    await sem.acquire(); // Takes the slot
+
+    // Queue up 100 waiters (should all succeed)
+    const promises: Promise<void>[] = [];
+    for (let i = 0; i < 100; i++) {
+      promises.push(sem.acquire());
+    }
+    expect(sem.pendingCount).toBe(100);
+
+    // 101st should fail
+    await expect(sem.acquire()).rejects.toThrow(/Semaphore queue is full/);
+
+    // Clean up
+    for (let i = 0; i <= 100; i++) {
+      sem.release();
+    }
+    await Promise.all(promises);
+  });
 });
 
 describe("TopicQueue", () => {
@@ -121,6 +161,26 @@ describe("TopicQueue", () => {
 
     await done;
     expect(results).toEqual(["ok"]);
+  });
+
+  test("calls onError callback when a task fails", async () => {
+    const errors: unknown[] = [];
+    const queue = new TopicQueue(undefined, (error) => {
+      errors.push(error);
+    });
+
+    const done = new Promise<void>((resolve) => {
+      queue.enqueue(async () => {
+        throw new Error("task-failure");
+      });
+      queue.enqueue(async () => {
+        resolve();
+      });
+    });
+
+    await done;
+    expect(errors.length).toBe(1);
+    expect(String(errors[0])).toContain("task-failure");
   });
 
   test("size and isProcessing getters", async () => {

@@ -1,17 +1,26 @@
 import { logError } from "@assistant-core/src/logging";
 
+const DEFAULT_MAX_QUEUE_SIZE = 100;
+
 export class Semaphore {
   private count: number;
   private readonly waiting: Array<() => void> = [];
+  private readonly maxQueueSize: number;
 
-  constructor(max: number) {
+  constructor(max: number, maxQueueSize: number = DEFAULT_MAX_QUEUE_SIZE) {
     this.count = max;
+    this.maxQueueSize = maxQueueSize;
   }
 
   async acquire(): Promise<void> {
     if (this.count > 0) {
       this.count--;
       return;
+    }
+    if (this.waiting.length >= this.maxQueueSize) {
+      throw new Error(
+        `Semaphore queue is full (${this.maxQueueSize} waiting). Rejecting new work.`,
+      );
     }
     return new Promise((resolve) => this.waiting.push(resolve));
   }
@@ -39,9 +48,11 @@ export class TopicQueue {
   private running = false;
   private drainResolvers: Array<() => void> = [];
   private readonly onIdle?: () => void;
+  private readonly onError?: (error: unknown) => void;
 
-  constructor(onIdle?: () => void) {
+  constructor(onIdle?: () => void, onError?: (error: unknown) => void) {
     this.onIdle = onIdle;
+    this.onError = onError;
   }
 
   enqueue(task: () => Promise<void>): void {
@@ -59,6 +70,7 @@ export class TopicQueue {
         await task();
       } catch (error) {
         logError("topic_queue.task_failed", { error: String(error) });
+        this.onError?.(error);
       }
     }
     this.running = false;

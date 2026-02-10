@@ -25,13 +25,14 @@ export const sendMessage = async (
           text: outbound.text,
         };
 
+  const TELEGRAM_400_ERROR_PATTERN = "Telegram sendMessage failed: 400";
+
   try {
     await chatPort.send(payload);
   } catch (error) {
     const errorText = String(error);
     const shouldRetryWithoutThread =
-      threadId !== null &&
-      errorText.includes("Telegram sendMessage failed: 400");
+      threadId !== null && errorText.includes(TELEGRAM_400_ERROR_PATTERN);
     if (!shouldRetryWithoutThread) {
       throw error;
     }

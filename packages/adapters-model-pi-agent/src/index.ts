@@ -13,8 +13,9 @@ export { createWorkspaceTools } from "./tools";
 export type { PiAgentAdapterConfig } from "./types";
 
 const DEFAULT_AGENT_IDLE_TIMEOUT_MS = 45 * 60 * 1000; // 45 minutes
+const EVICTION_SIZE_THRESHOLD = 50;
 
-type CachedAgent = { agent: Agent; lastUsedAt: number };
+type CachedAgent = { agent: Agent; lastUsedAt: number; workspacePath: string };
 
 export class PiAgentModelAdapter implements ModelPort {
   private readonly config: PiAgentAdapterConfig;
@@ -35,7 +36,9 @@ export class PiAgentModelAdapter implements ModelPort {
   }
 
   private getOrCreateAgent(sessionKey: string): Agent {
-    this.evictIdleAgents();
+    if (this.agents.size > EVICTION_SIZE_THRESHOLD) {
+      this.evictIdleAgents();
+    }
 
     const existing = this.agents.get(sessionKey);
     if (existing) {
@@ -63,7 +66,11 @@ export class PiAgentModelAdapter implements ModelPort {
     agent.setSystemPrompt(systemPrompt);
     agent.setTools(tools);
 
-    this.agents.set(sessionKey, { agent, lastUsedAt: Date.now() });
+    this.agents.set(sessionKey, {
+      agent,
+      lastUsedAt: Date.now(),
+      workspacePath: this.config.workspacePath,
+    });
     return agent;
   }
 
@@ -72,18 +79,22 @@ export class PiAgentModelAdapter implements ModelPort {
       input.sessionId ?? `${input.chatId}:${input.threadId ?? "root"}`;
     const agent = this.getOrCreateAgent(sessionKey);
 
-    // Update workspace-scoped tools if workspace changed
+    // Update workspace-scoped tools only if workspace actually changed
     if (input.workspacePath) {
-      const tools = createWorkspaceTools(input.workspacePath, {
-        enableShellTool: this.config.enableShellTool,
-      });
-      agent.setTools(tools);
-      const systemPrompt = loadSystemPrompt({
-        workspacePath: input.workspacePath,
-        systemPromptPath: this.config.systemPromptPath,
-        gitIdentity: this.config.gitIdentity,
-      });
-      agent.setSystemPrompt(systemPrompt);
+      const cached = this.agents.get(sessionKey);
+      if (cached && cached.workspacePath !== input.workspacePath) {
+        const tools = createWorkspaceTools(input.workspacePath, {
+          enableShellTool: this.config.enableShellTool,
+        });
+        agent.setTools(tools);
+        const systemPrompt = loadSystemPrompt({
+          workspacePath: input.workspacePath,
+          systemPromptPath: this.config.systemPromptPath,
+          gitIdentity: this.config.gitIdentity,
+        });
+        agent.setSystemPrompt(systemPrompt);
+        cached.workspacePath = input.workspacePath;
+      }
     }
 
     let totalInputTokens = 0;

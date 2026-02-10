@@ -68,6 +68,9 @@ const formatCostFooter = (usage: {
   cost: number;
 }): string => {
   const totalTokens = usage.inputTokens + usage.outputTokens;
+  if (usage.cost <= 0) {
+    return `\n\n---\n💰 ${formatTokenCount(totalTokens)} tokens`;
+  }
   const costStr =
     usage.cost < 0.01
       ? `$${usage.cost.toFixed(4)}`
