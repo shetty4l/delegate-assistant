@@ -5,6 +5,7 @@ import {
   probeOpencodeReachability,
 } from "@assistant-core/src/opencode-server";
 import { SqliteSessionStore } from "@assistant-core/src/session-store";
+import { sleep } from "@assistant-core/src/timers";
 import {
   formatVersionFingerprint,
   loadBuildInfo,
@@ -20,9 +21,6 @@ const WORKER_ROLE = "worker";
 const PORT_RECLAIM_TERM_TIMEOUT_MS = 4_000;
 const PORT_RECLAIM_KILL_TIMEOUT_MS = 1_500;
 const PORT_RECLAIM_POLL_INTERVAL_MS = 100;
-
-const sleep = (ms: number): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, ms));
 
 const isAddressInUseError = (error: unknown): boolean => {
   if (!error || typeof error !== "object") {
@@ -239,6 +237,10 @@ const runWorkerProcess = async (): Promise<number> => {
             systemPromptPath: config.systemPromptPath ?? undefined,
             gitIdentity: process.env.GIT_AUTHOR_NAME,
             enableShellTool: config.piAgentEnableShellTool,
+            shellCommandDenylist:
+              config.shellCommandDenylist.length > 0
+                ? config.shellCommandDenylist
+                : undefined,
           })
         : new DeterministicModelStub();
 

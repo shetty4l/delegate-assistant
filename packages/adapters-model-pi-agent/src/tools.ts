@@ -6,6 +6,45 @@ import { Type } from "@sinclair/typebox";
 const MAX_FILE_SIZE = 256 * 1024; // 256 KB
 
 /**
+ * Default patterns that are blocked from being executed via the shell tool.
+ * Each entry is a substring match against the full command string.
+ */
+export const DEFAULT_SHELL_COMMAND_DENYLIST: readonly string[] = [
+  "rm -rf /",
+  "mkfs",
+  "dd if=",
+  "shutdown",
+  "reboot",
+  "halt",
+  "poweroff",
+  ":{:|:&};:",
+  ":(){:|:&};:",
+  "> /dev/sda",
+  "chmod -R 777 /",
+  "chown -R",
+  "mv / ",
+  "wget|sh",
+  "curl|sh",
+  "fork bomb",
+];
+
+/**
+ * Returns the first denylist pattern matched by the command, or null if the
+ * command is allowed.
+ */
+export const matchesDenylist = (
+  command: string,
+  denylist: readonly string[],
+): string | null => {
+  for (const pattern of denylist) {
+    if (command.includes(pattern)) {
+      return pattern;
+    }
+  }
+  return null;
+};
+
+/**
  * Env vars that are safe to expose to AI-spawned shell commands.
  * Notably excludes TELEGRAM_BOT_TOKEN, PI_AGENT_API_KEY, and other secrets.
  */
@@ -153,6 +192,7 @@ export const createWriteFileTool = (workspacePath: string): AgentTool<any> => ({
 export const createExecuteShellTool = (
   workspacePath: string,
   timeoutMs = 30_000,
+  denylist: readonly string[] = DEFAULT_SHELL_COMMAND_DENYLIST,
 ): AgentTool<any> => ({
   name: "execute_shell",
   label: "Execute Shell",
@@ -171,6 +211,12 @@ export const createExecuteShellTool = (
     _toolCallId,
     params: { command: string; workdir?: string },
   ) => {
+    const blocked = matchesDenylist(params.command, denylist);
+    if (blocked) {
+      return errorResult(
+        `Command blocked by denylist (matched pattern: "${blocked}"). This command is not allowed.`,
+      );
+    }
     let cwd = workspacePath;
     if (params.workdir) {
       const safeCwd = resolveSafePath(workspacePath, params.workdir);
@@ -320,6 +366,8 @@ export const createSearchFilesTool = (
 export type WorkspaceToolOptions = {
   /** Enable the execute_shell tool (default: true). */
   enableShellTool?: boolean;
+  /** Substring patterns to block in shell commands (uses DEFAULT_SHELL_COMMAND_DENYLIST when omitted). */
+  shellCommandDenylist?: string[];
 };
 
 export const createWorkspaceTools = (
@@ -334,7 +382,13 @@ export const createWorkspaceTools = (
     createSearchFilesTool(workspacePath),
   ];
   if (enableShellTool) {
-    tools.splice(2, 0, createExecuteShellTool(workspacePath));
+    const denylist =
+      options.shellCommandDenylist ?? DEFAULT_SHELL_COMMAND_DENYLIST;
+    tools.splice(
+      2,
+      0,
+      createExecuteShellTool(workspacePath, undefined, denylist),
+    );
   }
   return tools;
 };

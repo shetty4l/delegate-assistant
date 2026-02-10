@@ -31,6 +31,7 @@ export type AppConfig = {
   maxConcurrentTopics: number;
   systemPromptPath: string | null;
   piAgentEnableShellTool: boolean;
+  shellCommandDenylist: string[];
 };
 
 type RawConfigFile = {
@@ -60,6 +61,7 @@ type RawConfigFile = {
   maxConcurrentTopics?: number;
   systemPromptPath?: string | null;
   piAgentEnableShellTool?: boolean;
+  shellCommandDenylist?: string[];
 };
 
 const defaultConfigPath = "~/.config/delegate-assistant/config.json";
@@ -140,7 +142,7 @@ const asModelProvider = (
     return value;
   }
   throw new Error(
-    `MODEL_PROVIDER must be one of: stub, opencode_cli, pi_agent (received ${String(value)})`,
+    `Model provider must be one of: stub, opencode_cli, pi_agent (received "${String(value)}")`,
   );
 };
 
@@ -303,20 +305,27 @@ export const loadConfig = (): AppConfig => {
     process.env.PI_AGENT_ENABLE_SHELL_TOOL !== undefined
       ? process.env.PI_AGENT_ENABLE_SHELL_TOOL.trim() !== "false"
       : (asOptionalBoolean(fileConfig.piAgentEnableShellTool) ?? true);
+  const shellCommandDenylist: string[] = Array.isArray(
+    fileConfig.shellCommandDenylist,
+  )
+    ? fileConfig.shellCommandDenylist.filter(
+        (item): item is string => typeof item === "string",
+      )
+    : [];
 
   if (!existsSync(assistantRepoPath)) {
-    throw new Error(`ASSISTANT_REPO_PATH does not exist: ${assistantRepoPath}`);
+    throw new Error(`Assistant repo path does not exist: ${assistantRepoPath}`);
   }
-  asPositiveInt(port, "PORT");
-  asPositiveInt(telegramPollIntervalMs, "TELEGRAM_POLL_INTERVAL_MS");
-  asPositiveInt(opencodeServePort, "OPENCODE_SERVE_PORT");
-  asPositiveInt(sessionIdleTimeoutMs, "SESSION_IDLE_TIMEOUT_MS");
-  asPositiveInt(sessionMaxConcurrent, "SESSION_MAX_CONCURRENT");
-  asPositiveInt(sessionRetryAttempts, "SESSION_RETRY_ATTEMPTS");
-  asPositiveInt(relayTimeoutMs, "RELAY_TIMEOUT_MS");
-  asPositiveInt(progressFirstMs, "PROGRESS_FIRST_MS");
-  asPositiveInt(progressEveryMs, "PROGRESS_EVERY_MS");
-  asPositiveInt(progressMaxCount, "PROGRESS_MAX_COUNT");
+  asPositiveInt(port, "port");
+  asPositiveInt(telegramPollIntervalMs, "telegramPollIntervalMs");
+  asPositiveInt(opencodeServePort, "opencodeServePort");
+  asPositiveInt(sessionIdleTimeoutMs, "sessionIdleTimeoutMs");
+  asPositiveInt(sessionMaxConcurrent, "sessionMaxConcurrent");
+  asPositiveInt(sessionRetryAttempts, "sessionRetryAttempts");
+  asPositiveInt(relayTimeoutMs, "relayTimeoutMs");
+  asPositiveInt(progressFirstMs, "progressFirstMs");
+  asPositiveInt(progressEveryMs, "progressEveryMs");
+  asPositiveInt(progressMaxCount, "progressMaxCount");
 
   if (modelProvider === "pi_agent" && !piAgentApiKey) {
     const providerEnvVars: Record<string, string> = {
@@ -331,10 +340,10 @@ export const loadConfig = (): AppConfig => {
     const hasProviderKey = expectedVar ? !!process.env[expectedVar] : false;
     if (!hasProviderKey) {
       const hint = expectedVar
-        ? `Set PI_AGENT_API_KEY or ${expectedVar}`
-        : "Set PI_AGENT_API_KEY";
+        ? `Set piAgentApiKey (or ${expectedVar} env var)`
+        : "Set piAgentApiKey";
       throw new Error(
-        `${hint} when modelProvider is pi_agent (provider: ${piAgentProvider}).`,
+        `${hint} when model provider is "pi_agent" (provider: ${piAgentProvider}).`,
       );
     }
   }
@@ -384,5 +393,6 @@ export const loadConfig = (): AppConfig => {
     maxConcurrentTopics,
     systemPromptPath,
     piAgentEnableShellTool,
+    shellCommandDenylist,
   };
 };

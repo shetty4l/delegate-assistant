@@ -153,7 +153,7 @@ describe("pi_agent API key validation", () => {
     delete process.env.GROQ_API_KEY;
 
     expect(() => loadConfig()).toThrow(
-      "Set PI_AGENT_API_KEY or GROQ_API_KEY when modelProvider is pi_agent (provider: groq).",
+      'Set piAgentApiKey (or GROQ_API_KEY env var) when model provider is "pi_agent" (provider: groq).',
     );
   });
 
@@ -164,7 +164,7 @@ describe("pi_agent API key validation", () => {
     delete process.env.OPENROUTER_API_KEY;
 
     expect(() => loadConfig()).toThrow(
-      "Set PI_AGENT_API_KEY or OPENROUTER_API_KEY when modelProvider is pi_agent (provider: openrouter).",
+      'Set piAgentApiKey (or OPENROUTER_API_KEY env var) when model provider is "pi_agent" (provider: openrouter).',
     );
   });
 
@@ -174,7 +174,7 @@ describe("pi_agent API key validation", () => {
     delete process.env.PI_AGENT_API_KEY;
 
     expect(() => loadConfig()).toThrow(
-      "Set PI_AGENT_API_KEY when modelProvider is pi_agent (provider: custom-provider).",
+      'Set piAgentApiKey when model provider is "pi_agent" (provider: custom-provider).',
     );
   });
 
