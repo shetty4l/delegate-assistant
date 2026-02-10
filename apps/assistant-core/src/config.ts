@@ -332,6 +332,22 @@ export const loadConfig = (): AppConfig => {
     }
   }
 
+  // Warn about missing delegate identity env vars (non-fatal)
+  if (!process.env.GIT_AUTHOR_NAME || !process.env.GIT_AUTHOR_EMAIL) {
+    console.warn(
+      "[config] WARNING: GIT_AUTHOR_NAME or GIT_AUTHOR_EMAIL not set. " +
+        "Git commits from the assistant will use the system default identity. " +
+        "Add these to ~/.config/delegate-assistant/secrets.env for proper attribution.",
+    );
+  }
+  if (!process.env.DELEGATE_GITHUB_TOKEN) {
+    console.warn(
+      "[config] WARNING: DELEGATE_GITHUB_TOKEN not set. " +
+        "The assistant will not be able to push branches or create PRs on GitHub. " +
+        "Add this to ~/.config/delegate-assistant/secrets.env.",
+    );
+  }
+
   return {
     configSourcePath,
     envOverridesApplied: overriddenKeys,

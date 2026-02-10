@@ -5,6 +5,51 @@ import { Type } from "@sinclair/typebox";
 
 const MAX_FILE_SIZE = 256 * 1024; // 256 KB
 
+/**
+ * Env vars that are safe to expose to AI-spawned shell commands.
+ * Notably excludes TELEGRAM_BOT_TOKEN, PI_AGENT_API_KEY, and other secrets.
+ */
+const SHELL_ENV_ALLOWLIST = [
+  // System essentials
+  "PATH",
+  "HOME",
+  "USER",
+  "SHELL",
+  "LANG",
+  "LC_ALL",
+  "TERM",
+  "TMPDIR",
+  // Bun/Node toolchain
+  "BUN_INSTALL",
+  "NODE_PATH",
+  // Git identity (set via secrets.env on the delegate's process)
+  "GIT_AUTHOR_NAME",
+  "GIT_AUTHOR_EMAIL",
+  "GIT_COMMITTER_NAME",
+  "GIT_COMMITTER_EMAIL",
+] as const;
+
+/**
+ * Build a sanitized environment for AI-spawned shell commands.
+ * Only allowlisted vars are passed through. DELEGATE_GITHUB_TOKEN is
+ * re-mapped to GH_TOKEN so `gh` CLI uses the delegate's identity.
+ */
+export const buildShellEnv = (): Record<string, string> => {
+  const env: Record<string, string> = {};
+  for (const key of SHELL_ENV_ALLOWLIST) {
+    const value = process.env[key];
+    if (value !== undefined) {
+      env[key] = value;
+    }
+  }
+  // Map DELEGATE_GITHUB_TOKEN -> GH_TOKEN for gh CLI auth
+  const ghToken = process.env.DELEGATE_GITHUB_TOKEN;
+  if (ghToken) {
+    env.GH_TOKEN = ghToken;
+  }
+  return env;
+};
+
 const isWithinWorkspace = (
   workspacePath: string,
   targetPath: string,
@@ -128,6 +173,7 @@ export const createExecuteShellTool = (
       const proc = Bun.spawn({
         cmd: ["bash", "-c", params.command],
         cwd,
+        env: buildShellEnv(),
         stdout: "pipe",
         stderr: "pipe",
       });
@@ -227,6 +273,7 @@ export const createSearchFilesTool = (
       const proc = Bun.spawn({
         cmd: ["grep", "-rn", "--include=*", "-E", params.pattern, safePath],
         cwd: workspacePath,
+        env: buildShellEnv(),
         stdout: "pipe",
         stderr: "pipe",
       });
