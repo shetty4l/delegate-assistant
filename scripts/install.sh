@@ -231,12 +231,8 @@ EOF
   if [ -n "$gh_token" ]; then
     local gh_username=""
     local gh_email=""
-    printf 'Delegate GitHub username [suyash-delegate]: ' >&2
-    read -r gh_username < /dev/tty
-    gh_username="${gh_username:-suyash-delegate}"
-    printf 'Delegate GitHub email [suyash.delegate@gmail.com]: ' >&2
-    read -r gh_email < /dev/tty
-    gh_email="${gh_email:-suyash.delegate@gmail.com}"
+    gh_username=$(prompt_value "GIT_AUTHOR_NAME" "Delegate GitHub username")
+    gh_email=$(prompt_value "GIT_AUTHOR_EMAIL" "Delegate GitHub email")
     cat >> "$SECRETS_FILE" << EOF
 DELEGATE_GITHUB_TOKEN=${gh_token}
 GIT_AUTHOR_NAME=${gh_username}

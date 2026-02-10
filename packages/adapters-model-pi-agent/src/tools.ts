@@ -138,6 +138,18 @@ export const createWriteFileTool = (workspacePath: string): AgentTool<any> => ({
   },
 });
 
+/**
+ * Security note: execute_shell gives the AI agent unrestricted command
+ * execution via `bash -c`. While the env allowlist (SHELL_ENV_ALLOWLIST)
+ * prevents secret leakage and the workdir is scoped to the workspace,
+ * the command itself is NOT sandboxed -- the agent can read files outside
+ * the workspace, access the network, or run arbitrary programs.
+ *
+ * This is an intentional design choice for a single-user, trusted
+ * deployment (personal assistant on a private machine). If exposed to
+ * untrusted users, disable this tool via `enableShellTool: false` in
+ * the adapter config or `PI_AGENT_ENABLE_SHELL_TOOL=false` env var.
+ */
 export const createExecuteShellTool = (
   workspacePath: string,
   timeoutMs = 30_000,
@@ -305,12 +317,24 @@ export const createSearchFilesTool = (
   },
 });
 
+export type WorkspaceToolOptions = {
+  /** Enable the execute_shell tool (default: true). */
+  enableShellTool?: boolean;
+};
+
 export const createWorkspaceTools = (
   workspacePath: string,
-): AgentTool<any>[] => [
-  createReadFileTool(workspacePath),
-  createWriteFileTool(workspacePath),
-  createExecuteShellTool(workspacePath),
-  createListDirectoryTool(workspacePath),
-  createSearchFilesTool(workspacePath),
-];
+  options: WorkspaceToolOptions = {},
+): AgentTool<any>[] => {
+  const { enableShellTool = true } = options;
+  const tools: AgentTool<any>[] = [
+    createReadFileTool(workspacePath),
+    createWriteFileTool(workspacePath),
+    createListDirectoryTool(workspacePath),
+    createSearchFilesTool(workspacePath),
+  ];
+  if (enableShellTool) {
+    tools.splice(2, 0, createExecuteShellTool(workspacePath));
+  }
+  return tools;
+};
