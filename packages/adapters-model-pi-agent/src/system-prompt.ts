@@ -44,8 +44,10 @@ export const loadSystemPrompt = (args: {
       if (custom.length > 0) {
         return custom;
       }
-    } catch {
-      // fall through to default
+    } catch (error) {
+      console.warn(
+        `Failed to load custom system prompt from ${args.systemPromptPath}, using default: ${String(error)}`,
+      );
     }
   }
 
