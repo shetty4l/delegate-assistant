@@ -18,6 +18,7 @@
     "typecheck:web": "bun run --cwd apps/session-manager-web typecheck",
     "build:web": "bun run --cwd apps/session-manager-web build",
     "test": "bun test",
+    "test:integ": "bun test packages/adapters-model-pi-agent/tests/integration.test.ts",
     "lint": "oxlint apps/**/src packages/**/src --deny-warnings",
     "format": "biome check --write apps/**/src packages/**/src docs README.md .github",
     "format:check": "biome check apps/**/src packages/**/src docs README.md .github",
