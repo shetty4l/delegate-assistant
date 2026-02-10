@@ -6,8 +6,6 @@ import type { InboundMessage } from "@delegate/domain";
 export const buildTopicKey = (message: InboundMessage): string =>
   `${message.chatId}:${message.threadId ?? "root"}`;
 
-export const buildSessionKey = (topicKey: string): string => topicKey;
-
 const rememberWorkspace = (
   ctx: WorkerContext,
   topicKey: string,

@@ -20,10 +20,10 @@ import {
   isSlashCommand,
 } from "@assistant-core/src/slash-commands";
 import { flushPendingStartupAck } from "@assistant-core/src/startup-ack";
+import { sleep } from "@assistant-core/src/timers";
 import { formatVersionFingerprint } from "@assistant-core/src/version";
 import { WorkerContext } from "@assistant-core/src/worker-context";
 import {
-  buildSessionKey,
   buildTopicKey,
   loadActiveWorkspace,
   setActiveWorkspace,
@@ -46,11 +46,6 @@ import type {
 } from "@assistant-core/src/worker-types";
 
 export { flushPendingStartupAck };
-
-const sleep = (ms: number): Promise<void> =>
-  new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
 
 const formatTokenCount = (count: number): string => {
   if (count >= 1_000_000) {
@@ -253,7 +248,7 @@ export const handleChatMessage = async (
     return;
   }
 
-  const sessionKey = buildSessionKey(topicKey);
+  const sessionKey = topicKey;
   if (deps.sessionStore?.touchTopicWorkspace) {
     await deps.sessionStore.touchTopicWorkspace(
       topicKey,

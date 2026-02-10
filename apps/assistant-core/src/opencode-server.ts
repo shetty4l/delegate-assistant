@@ -1,3 +1,5 @@
+import { sleep } from "@assistant-core/src/timers";
+
 type EnsureServerOptions = {
   binaryPath: string;
   attachUrl: string;
@@ -9,9 +11,6 @@ type EnsureServerOptions = {
   spawnServer?: () => void;
   waitMs?: (ms: number) => Promise<void>;
 };
-
-const sleep = (ms: number): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, ms));
 
 export const probeOpencodeReachability = async (
   attachUrl: string,

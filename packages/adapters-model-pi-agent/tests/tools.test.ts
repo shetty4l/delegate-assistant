@@ -10,6 +10,8 @@ import {
   createReadFileTool,
   createSearchFilesTool,
   createWriteFileTool,
+  DEFAULT_SHELL_COMMAND_DENYLIST,
+  matchesDenylist,
 } from "../src/tools";
 
 let workspace: string;
@@ -232,5 +234,137 @@ describe("buildShellEnv", () => {
         }
       }
     }
+  });
+});
+
+describe("matchesDenylist", () => {
+  test("returns null for safe commands", () => {
+    expect(
+      matchesDenylist("ls -la", DEFAULT_SHELL_COMMAND_DENYLIST),
+    ).toBeNull();
+    expect(
+      matchesDenylist("git status", DEFAULT_SHELL_COMMAND_DENYLIST),
+    ).toBeNull();
+    expect(
+      matchesDenylist("echo hello", DEFAULT_SHELL_COMMAND_DENYLIST),
+    ).toBeNull();
+  });
+
+  test("blocks rm -rf /", () => {
+    const result = matchesDenylist("rm -rf /", DEFAULT_SHELL_COMMAND_DENYLIST);
+    expect(result).toBe("rm -rf /");
+  });
+
+  test("blocks rm -rf / embedded in a larger command", () => {
+    const result = matchesDenylist(
+      "echo hi && rm -rf / --no-preserve-root",
+      DEFAULT_SHELL_COMMAND_DENYLIST,
+    );
+    expect(result).toBe("rm -rf /");
+  });
+
+  test("blocks mkfs commands", () => {
+    const result = matchesDenylist(
+      "mkfs.ext4 /dev/sda1",
+      DEFAULT_SHELL_COMMAND_DENYLIST,
+    );
+    expect(result).toBe("mkfs");
+  });
+
+  test("blocks dd if= commands", () => {
+    const result = matchesDenylist(
+      "dd if=/dev/zero of=/dev/sda",
+      DEFAULT_SHELL_COMMAND_DENYLIST,
+    );
+    expect(result).toBe("dd if=");
+  });
+
+  test("blocks shutdown", () => {
+    const result = matchesDenylist(
+      "shutdown -h now",
+      DEFAULT_SHELL_COMMAND_DENYLIST,
+    );
+    expect(result).toBe("shutdown");
+  });
+
+  test("blocks fork bomb", () => {
+    const result = matchesDenylist(
+      ":(){:|:&};:",
+      DEFAULT_SHELL_COMMAND_DENYLIST,
+    );
+    expect(result).toBe(":(){:|:&};:");
+  });
+
+  test("blocks chmod -R 777 /", () => {
+    const result = matchesDenylist(
+      "chmod -R 777 / something",
+      DEFAULT_SHELL_COMMAND_DENYLIST,
+    );
+    expect(result).toBe("chmod -R 777 /");
+  });
+
+  test("allows rm -rf on non-root paths", () => {
+    expect(
+      matchesDenylist("rm -rf ./build", DEFAULT_SHELL_COMMAND_DENYLIST),
+    ).toBeNull();
+  });
+
+  test("uses custom denylist when provided", () => {
+    const custom = ["npm publish", "git push --force"];
+    expect(matchesDenylist("npm publish --tag latest", custom)).toBe(
+      "npm publish",
+    );
+    expect(matchesDenylist("git status", custom)).toBeNull();
+  });
+});
+
+describe("execute_shell denylist integration", () => {
+  test("blocks denied commands and returns error result", async () => {
+    const tool = createExecuteShellTool(workspace);
+    const result = await tool.execute("tc-deny-1", {
+      command: "rm -rf / --no-preserve-root",
+    });
+    const text = (result.content[0] as { type: "text"; text: string }).text;
+    expect(text).toContain("blocked by denylist");
+    expect(text).toContain("rm -rf /");
+  });
+
+  test("allows safe commands through", async () => {
+    const tool = createExecuteShellTool(workspace);
+    const result = await tool.execute("tc-deny-2", {
+      command: "echo safe",
+    });
+    const text = (result.content[0] as { type: "text"; text: string }).text;
+    expect(text).toContain("safe");
+    expect(text).toContain("exit code: 0");
+  });
+
+  test("respects custom denylist", async () => {
+    const tool = createExecuteShellTool(workspace, 30_000, ["echo forbidden"]);
+    const result = await tool.execute("tc-deny-3", {
+      command: "echo forbidden stuff",
+    });
+    const text = (result.content[0] as { type: "text"; text: string }).text;
+    expect(text).toContain("blocked by denylist");
+  });
+
+  test("allows commands not in custom denylist", async () => {
+    const tool = createExecuteShellTool(workspace, 30_000, ["echo forbidden"]);
+    const result = await tool.execute("tc-deny-4", {
+      command: "echo allowed",
+    });
+    const text = (result.content[0] as { type: "text"; text: string }).text;
+    expect(text).toContain("allowed");
+    expect(text).toContain("exit code: 0");
+  });
+
+  test("empty denylist allows all commands", async () => {
+    const tool = createExecuteShellTool(workspace, 30_000, []);
+    const result = await tool.execute("tc-deny-5", {
+      command: "echo anything",
+    });
+    const text = (result.content[0] as { type: "text"; text: string }).text;
+    expect(text).toContain("anything");
+    expect(text).toContain("exit code: 0");
   });
 });
