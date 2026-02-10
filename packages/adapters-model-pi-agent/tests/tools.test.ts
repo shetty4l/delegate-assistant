@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,14 +17,14 @@ import {
   createReadFileTool,
   createSearchFilesTool,
   createWriteFileTool,
-  DEFAULT_SHELL_COMMAND_DENYLIST,
   matchesDenylist,
+  SHELL_COMMAND_DENYLIST,
 } from "../src/tools";
 
 let workspace: string;
 
 beforeEach(() => {
-  workspace = mkdtempSync(join(tmpdir(), "pi-agent-tools-"));
+  workspace = realpathSync(mkdtempSync(join(tmpdir(), "pi-agent-tools-")));
   writeFileSync(join(workspace, "hello.txt"), "hello world\n", "utf8");
   mkdirSync(join(workspace, "subdir"), { recursive: true });
   writeFileSync(
@@ -55,6 +62,43 @@ describe("tool path scoping", () => {
     const result = await tool.execute("tc-3", { command: "pwd" });
     const text = (result.content[0] as { type: "text"; text: string }).text;
     expect(text).toContain(workspace);
+  });
+
+  test("read_file rejects symlink escape", async () => {
+    // Create a symlink inside workspace pointing outside
+    symlinkSync("/etc", join(workspace, "sneaky-link"));
+    const tool = createReadFileTool(workspace);
+    const result = await tool.execute("tc-symlink", {
+      path: "sneaky-link/hosts",
+    });
+    const text = (result.content[0] as { type: "text"; text: string }).text;
+    expect(text).toContain("outside the workspace");
+  });
+
+  test("write_file through symlinked directory is blocked", async () => {
+    symlinkSync("/tmp", join(workspace, "escape-dir"));
+    const tool = createWriteFileTool(workspace);
+    const result = await tool.execute("tc-symlink-write", {
+      path: "escape-dir/evil.txt",
+      content: "bad",
+    });
+    const text = (result.content[0] as { type: "text"; text: string }).text;
+    expect(text).toContain("outside the workspace");
+  });
+
+  test("write_file to genuinely new path is allowed", async () => {
+    const tool = createWriteFileTool(workspace);
+    const result = await tool.execute("tc-new-path", {
+      path: "brand-new-dir/new-file.txt",
+      content: "fresh content",
+    });
+    const text = (result.content[0] as { type: "text"; text: string }).text;
+    expect(text).toContain("Wrote");
+    const written = readFileSync(
+      join(workspace, "brand-new-dir/new-file.txt"),
+      "utf8",
+    );
+    expect(written).toBe("fresh content");
   });
 });
 
@@ -239,82 +283,68 @@ describe("buildShellEnv", () => {
 
 describe("matchesDenylist", () => {
   test("returns null for safe commands", () => {
-    expect(
-      matchesDenylist("ls -la", DEFAULT_SHELL_COMMAND_DENYLIST),
-    ).toBeNull();
-    expect(
-      matchesDenylist("git status", DEFAULT_SHELL_COMMAND_DENYLIST),
-    ).toBeNull();
-    expect(
-      matchesDenylist("echo hello", DEFAULT_SHELL_COMMAND_DENYLIST),
-    ).toBeNull();
+    expect(matchesDenylist("ls -la")).toBeNull();
+    expect(matchesDenylist("git status")).toBeNull();
+    expect(matchesDenylist("echo hello")).toBeNull();
   });
 
   test("blocks rm -rf /", () => {
-    const result = matchesDenylist("rm -rf /", DEFAULT_SHELL_COMMAND_DENYLIST);
-    expect(result).toBe("rm -rf /");
+    expect(matchesDenylist("rm -rf /")).toBe("rm -rf /");
   });
 
   test("blocks rm -rf / embedded in a larger command", () => {
-    const result = matchesDenylist(
-      "echo hi && rm -rf / --no-preserve-root",
-      DEFAULT_SHELL_COMMAND_DENYLIST,
+    expect(matchesDenylist("echo hi && rm -rf / --no-preserve-root")).toBe(
+      "rm -rf /",
     );
-    expect(result).toBe("rm -rf /");
   });
 
   test("blocks mkfs commands", () => {
-    const result = matchesDenylist(
-      "mkfs.ext4 /dev/sda1",
-      DEFAULT_SHELL_COMMAND_DENYLIST,
-    );
-    expect(result).toBe("mkfs");
+    expect(matchesDenylist("mkfs.ext4 /dev/sda1")).toBe("mkfs");
   });
 
-  test("blocks dd if= commands", () => {
-    const result = matchesDenylist(
-      "dd if=/dev/zero of=/dev/sda",
-      DEFAULT_SHELL_COMMAND_DENYLIST,
-    );
-    expect(result).toBe("dd if=");
+  test("blocks dd from device files", () => {
+    expect(matchesDenylist("dd if=/dev/zero of=/dev/sda")).toBe("dd if=/dev/");
   });
 
   test("blocks shutdown", () => {
-    const result = matchesDenylist(
-      "shutdown -h now",
-      DEFAULT_SHELL_COMMAND_DENYLIST,
-    );
-    expect(result).toBe("shutdown");
+    expect(matchesDenylist("shutdown -h now")).toBe("shutdown");
   });
 
   test("blocks fork bomb", () => {
-    const result = matchesDenylist(
-      ":(){:|:&};:",
-      DEFAULT_SHELL_COMMAND_DENYLIST,
-    );
-    expect(result).toBe(":(){:|:&};:");
+    expect(matchesDenylist(":(){:|:&};:")).toBe("fork bomb");
   });
 
   test("blocks chmod -R 777 /", () => {
-    const result = matchesDenylist(
-      "chmod -R 777 / something",
-      DEFAULT_SHELL_COMMAND_DENYLIST,
-    );
-    expect(result).toBe("chmod -R 777 /");
+    expect(matchesDenylist("chmod -R 777 / something")).toBe("chmod -R 777 /");
   });
 
   test("allows rm -rf on non-root paths", () => {
-    expect(
-      matchesDenylist("rm -rf ./build", DEFAULT_SHELL_COMMAND_DENYLIST),
-    ).toBeNull();
+    expect(matchesDenylist("rm -rf ./build")).toBeNull();
   });
 
-  test("uses custom denylist when provided", () => {
-    const custom = ["npm publish", "git push --force"];
-    expect(matchesDenylist("npm publish --tag latest", custom)).toBe(
-      "npm publish",
-    );
-    expect(matchesDenylist("git status", custom)).toBeNull();
+  // False-positive regression tests (#58)
+  test("allows rm -rf /tmp/build (absolute non-root)", () => {
+    expect(matchesDenylist("rm -rf /tmp/build")).toBeNull();
+  });
+
+  test("allows halt_processing variable assignment", () => {
+    expect(matchesDenylist("halt_processing=true")).toBeNull();
+  });
+
+  test("allows reboot_counter variable", () => {
+    expect(matchesDenylist("reboot_counter=0")).toBeNull();
+  });
+
+  test("allows echo shutdown_mode", () => {
+    expect(matchesDenylist("echo shutdown_mode")).toBeNull();
+  });
+
+  test("allows chown -R on non-root paths", () => {
+    expect(matchesDenylist("chown -R user:group ./dir")).toBeNull();
+  });
+
+  test("allows dd with regular files", () => {
+    expect(matchesDenylist("dd if=input.txt of=output.txt")).toBeNull();
   });
 });
 
@@ -339,32 +369,12 @@ describe("execute_shell denylist integration", () => {
     expect(text).toContain("exit code: 0");
   });
 
-  test("respects custom denylist", async () => {
-    const tool = createExecuteShellTool(workspace, 30_000, ["echo forbidden"]);
+  test("allows commands that were false positives with substring matching", async () => {
+    const tool = createExecuteShellTool(workspace);
     const result = await tool.execute("tc-deny-3", {
-      command: "echo forbidden stuff",
+      command: "rm -rf /tmp/test-build",
     });
     const text = (result.content[0] as { type: "text"; text: string }).text;
-    expect(text).toContain("blocked by denylist");
-  });
-
-  test("allows commands not in custom denylist", async () => {
-    const tool = createExecuteShellTool(workspace, 30_000, ["echo forbidden"]);
-    const result = await tool.execute("tc-deny-4", {
-      command: "echo allowed",
-    });
-    const text = (result.content[0] as { type: "text"; text: string }).text;
-    expect(text).toContain("allowed");
-    expect(text).toContain("exit code: 0");
-  });
-
-  test("empty denylist allows all commands", async () => {
-    const tool = createExecuteShellTool(workspace, 30_000, []);
-    const result = await tool.execute("tc-deny-5", {
-      command: "echo anything",
-    });
-    const text = (result.content[0] as { type: "text"; text: string }).text;
-    expect(text).toContain("anything");
-    expect(text).toContain("exit code: 0");
+    expect(text).not.toContain("blocked by denylist");
   });
 });

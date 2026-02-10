@@ -1,6 +1,7 @@
 import { logInfo } from "@assistant-core/src/logging";
 import type { WorkerContext } from "@assistant-core/src/worker-context";
 import type { LogFields } from "@assistant-core/src/worker-types";
+import { TelegramApiError } from "@delegate/adapters-telegram";
 import type { ChatPort } from "@delegate/ports";
 
 export const sendMessage = async (
@@ -25,14 +26,13 @@ export const sendMessage = async (
           text: outbound.text,
         };
 
-  const TELEGRAM_400_ERROR_PATTERN = "Telegram sendMessage failed: 400";
-
   try {
     await chatPort.send(payload);
   } catch (error) {
-    const errorText = String(error);
     const shouldRetryWithoutThread =
-      threadId !== null && errorText.includes(TELEGRAM_400_ERROR_PATTERN);
+      threadId !== null &&
+      error instanceof TelegramApiError &&
+      error.statusCode === 400;
     if (!shouldRetryWithoutThread) {
       throw error;
     }

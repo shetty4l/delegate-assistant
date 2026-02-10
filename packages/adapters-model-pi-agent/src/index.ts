@@ -2,7 +2,7 @@ import type { ModelTurnResponse } from "@delegate/domain";
 import type { ModelPort, RespondInput } from "@delegate/ports";
 import type { AgentEvent } from "@mariozechner/pi-agent-core";
 import { Agent } from "@mariozechner/pi-agent-core";
-import type { AssistantMessage } from "@mariozechner/pi-ai";
+import type { AssistantMessage, KnownProvider } from "@mariozechner/pi-ai";
 import { getModel } from "@mariozechner/pi-ai";
 import { loadSystemPrompt } from "./system-prompt";
 import { createWorkspaceTools } from "./tools";
@@ -46,10 +46,10 @@ export class PiAgentModelAdapter implements ModelPort {
       return existing.agent;
     }
 
-    const model = getModel(
-      this.config.provider as any,
-      this.config.model as any,
-    );
+    // Cast needed: provider/model are dynamic strings, but getModel() requires
+    // specific literal types from its KnownProvider + model-id generic params.
+    const provider: KnownProvider = this.config.provider as KnownProvider;
+    const model = getModel(provider as any, this.config.model as any);
     const systemPrompt = loadSystemPrompt({
       workspacePath: this.config.workspacePath,
       systemPromptPath: this.config.systemPromptPath,
@@ -57,7 +57,6 @@ export class PiAgentModelAdapter implements ModelPort {
     });
     const tools = createWorkspaceTools(this.config.workspacePath, {
       enableShellTool: this.config.enableShellTool,
-      shellCommandDenylist: this.config.shellCommandDenylist,
     });
 
     const agent = new Agent({
@@ -86,7 +85,6 @@ export class PiAgentModelAdapter implements ModelPort {
       if (cached && cached.workspacePath !== input.workspacePath) {
         const tools = createWorkspaceTools(input.workspacePath, {
           enableShellTool: this.config.enableShellTool,
-          shellCommandDenylist: this.config.shellCommandDenylist,
         });
         agent.setTools(tools);
         const systemPrompt = loadSystemPrompt({

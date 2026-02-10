@@ -31,7 +31,6 @@ export type AppConfig = {
   maxConcurrentTopics: number;
   systemPromptPath: string | null;
   piAgentEnableShellTool: boolean;
-  shellCommandDenylist: string[];
 };
 
 type RawConfigFile = {
@@ -61,7 +60,6 @@ type RawConfigFile = {
   maxConcurrentTopics?: number;
   systemPromptPath?: string | null;
   piAgentEnableShellTool?: boolean;
-  shellCommandDenylist?: string[];
 };
 
 const defaultConfigPath = "~/.config/delegate-assistant/config.json";
@@ -305,13 +303,6 @@ export const loadConfig = (): AppConfig => {
     process.env.PI_AGENT_ENABLE_SHELL_TOOL !== undefined
       ? process.env.PI_AGENT_ENABLE_SHELL_TOOL.trim() !== "false"
       : (asOptionalBoolean(fileConfig.piAgentEnableShellTool) ?? true);
-  const shellCommandDenylist: string[] = Array.isArray(
-    fileConfig.shellCommandDenylist,
-  )
-    ? fileConfig.shellCommandDenylist.filter(
-        (item): item is string => typeof item === "string",
-      )
-    : [];
 
   if (!existsSync(assistantRepoPath)) {
     throw new Error(`Assistant repo path does not exist: ${assistantRepoPath}`);
@@ -393,6 +384,5 @@ export const loadConfig = (): AppConfig => {
     maxConcurrentTopics,
     systemPromptPath,
     piAgentEnableShellTool,
-    shellCommandDenylist,
   };
 };

@@ -1,44 +1,58 @@
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, resolve } from "node:path";
+import {
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from "node:fs";
+import { basename, dirname, isAbsolute, resolve } from "node:path";
 import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 import { Type } from "@sinclair/typebox";
 
 const MAX_FILE_SIZE = 256 * 1024; // 256 KB
 
 /**
- * Default patterns that are blocked from being executed via the shell tool.
- * Each entry is a substring match against the full command string.
+ * A denylist entry pairs a regex pattern with a human-readable label
+ * so error messages shown to the LLM remain understandable.
  */
-export const DEFAULT_SHELL_COMMAND_DENYLIST: readonly string[] = [
-  "rm -rf /",
-  "mkfs",
-  "dd if=",
-  "shutdown",
-  "reboot",
-  "halt",
-  "poweroff",
-  ":{:|:&};:",
-  ":(){:|:&};:",
-  "> /dev/sda",
-  "chmod -R 777 /",
-  "chown -R",
-  "mv / ",
-  "wget|sh",
-  "curl|sh",
-  "fork bomb",
+export type DenylistEntry = {
+  readonly pattern: RegExp;
+  readonly label: string;
+};
+
+/**
+ * Hardcoded patterns blocked from execute_shell.
+ * Uses regex with word boundaries to avoid false positives on legitimate
+ * commands like `rm -rf /tmp/build` or variable names like `halt_processing`.
+ */
+export const SHELL_COMMAND_DENYLIST: readonly DenylistEntry[] = [
+  { pattern: /\brm\s+-rf\s+\/(?!\S)/, label: "rm -rf /" },
+  { pattern: /\bmkfs\b/, label: "mkfs" },
+  { pattern: /\bdd\s+if=\/dev\//, label: "dd if=/dev/" },
+  { pattern: /\bshutdown\b/, label: "shutdown" },
+  { pattern: /\breboot\b/, label: "reboot" },
+  { pattern: /\bhalt\b/, label: "halt" },
+  { pattern: /\bpoweroff\b/, label: "poweroff" },
+  { pattern: /:\(\)\{.*:\|:&\};:/, label: "fork bomb" },
+  { pattern: />\s*\/dev\/sd/, label: "> /dev/sd*" },
+  { pattern: /\bchmod\s+-R\s+777\s+\/(?!\S)/, label: "chmod -R 777 /" },
+  { pattern: /\bchown\s+-R\s+\S+\s+\/(?!\S)/, label: "chown -R ... /" },
+  { pattern: /\bmv\s+\/\s/, label: "mv /" },
+  { pattern: /\bwget\b.*\|\s*\bsh\b/, label: "wget | sh" },
+  { pattern: /\bcurl\b.*\|\s*\bsh\b/, label: "curl | sh" },
 ];
 
 /**
- * Returns the first denylist pattern matched by the command, or null if the
- * command is allowed.
+ * Returns the human-readable label of the first denylist entry matched by the
+ * command, or null if the command is allowed.
  */
 export const matchesDenylist = (
   command: string,
-  denylist: readonly string[],
+  denylist: readonly DenylistEntry[] = SHELL_COMMAND_DENYLIST,
 ): string | null => {
-  for (const pattern of denylist) {
-    if (command.includes(pattern)) {
-      return pattern;
+  for (const entry of denylist) {
+    if (entry.pattern.test(command)) {
+      return entry.label;
     }
   }
   return null;
@@ -111,7 +125,28 @@ const resolveSafePath = (
   if (!isWithinWorkspace(workspacePath, target)) {
     return null;
   }
-  return target;
+  // Resolve symlinks on existing paths to prevent symlink escapes
+  try {
+    const real = realpathSync(target);
+    return isWithinWorkspace(workspacePath, real) ? real : null;
+  } catch (err: unknown) {
+    // Path doesn't exist yet (e.g. write_file creating a new file).
+    // Check the parent directory for symlink escapes instead.
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      try {
+        const realParent = realpathSync(dirname(target));
+        return isWithinWorkspace(workspacePath, realParent)
+          ? resolve(realParent, basename(target))
+          : null;
+      } catch {
+        // Parent also doesn't exist — fall back to the initial resolve-only check
+        // which already passed the isWithinWorkspace test above.
+        return target;
+      }
+    }
+    // Permission errors or other OS failures → deny
+    return null;
+  }
 };
 
 const textResult = (text: string): AgentToolResult<void> => ({
@@ -192,7 +227,6 @@ export const createWriteFileTool = (workspacePath: string): AgentTool<any> => ({
 export const createExecuteShellTool = (
   workspacePath: string,
   timeoutMs = 30_000,
-  denylist: readonly string[] = DEFAULT_SHELL_COMMAND_DENYLIST,
 ): AgentTool<any> => ({
   name: "execute_shell",
   label: "Execute Shell",
@@ -211,7 +245,7 @@ export const createExecuteShellTool = (
     _toolCallId,
     params: { command: string; workdir?: string },
   ) => {
-    const blocked = matchesDenylist(params.command, denylist);
+    const blocked = matchesDenylist(params.command);
     if (blocked) {
       return errorResult(
         `Command blocked by denylist (matched pattern: "${blocked}"). This command is not allowed.`,
@@ -329,15 +363,35 @@ export const createSearchFilesTool = (
     }
     try {
       const proc = Bun.spawn({
-        cmd: ["grep", "-rn", "--include=*", "-E", params.pattern, safePath],
+        cmd: ["grep", "-rn", "-E", params.pattern, safePath],
         cwd: workspacePath,
         env: buildShellEnv(),
         stdout: "pipe",
         stderr: "pipe",
       });
 
-      const stdout = await new Response(proc.stdout).text();
-      await proc.exited;
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      const timeoutMs = 30_000;
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          try {
+            proc.kill();
+          } catch {
+            // no-op
+          }
+          reject(new Error(`Search timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+      });
+
+      const [stdout] = await Promise.race([
+        Promise.all([
+          new Response(proc.stdout).text(),
+          new Response(proc.stderr).text(),
+          proc.exited,
+        ]),
+        timeoutPromise,
+      ]);
+      if (timer) clearTimeout(timer);
 
       if (!stdout.trim()) {
         return textResult("No matches found.");
@@ -366,29 +420,29 @@ export const createSearchFilesTool = (
 export type WorkspaceToolOptions = {
   /** Enable the execute_shell tool (default: true). */
   enableShellTool?: boolean;
-  /** Substring patterns to block in shell commands (uses DEFAULT_SHELL_COMMAND_DENYLIST when omitted). */
-  shellCommandDenylist?: string[];
 };
 
 export const createWorkspaceTools = (
   workspacePath: string,
   options: WorkspaceToolOptions = {},
 ): AgentTool<any>[] => {
+  // Resolve workspace symlinks once at construction time so all tools
+  // use the real path for bounds checks (e.g. /tmp -> /private/tmp on macOS).
+  let realWorkspacePath: string;
+  try {
+    realWorkspacePath = realpathSync(workspacePath);
+  } catch {
+    realWorkspacePath = resolve(workspacePath);
+  }
   const { enableShellTool = true } = options;
   const tools: AgentTool<any>[] = [
-    createReadFileTool(workspacePath),
-    createWriteFileTool(workspacePath),
-    createListDirectoryTool(workspacePath),
-    createSearchFilesTool(workspacePath),
+    createReadFileTool(realWorkspacePath),
+    createWriteFileTool(realWorkspacePath),
+    createListDirectoryTool(realWorkspacePath),
+    createSearchFilesTool(realWorkspacePath),
   ];
   if (enableShellTool) {
-    const denylist =
-      options.shellCommandDenylist ?? DEFAULT_SHELL_COMMAND_DENYLIST;
-    tools.splice(
-      2,
-      0,
-      createExecuteShellTool(workspacePath, undefined, denylist),
-    );
+    tools.splice(2, 0, createExecuteShellTool(realWorkspacePath));
   }
   return tools;
 };

@@ -11,6 +11,4 @@ export type PiAgentAdapterConfig = {
   enableShellTool?: boolean;
   /** Evict cached agents after this many ms of inactivity (default: 45 min). */
   agentIdleTimeoutMs?: number;
-  /** Substring patterns to block in shell commands. A command containing any pattern is rejected. */
-  shellCommandDenylist?: string[];
 };
