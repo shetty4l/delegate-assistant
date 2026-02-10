@@ -10,6 +10,7 @@
   "dependencies": {
     "@delegate/adapters-session-store-sqlite": "workspace:*",
     "@delegate/adapters-model-opencode-cli": "workspace:*",
+    "@delegate/adapters-model-pi-agent": "workspace:*",
     "@delegate/adapters-model-stub": "workspace:*",
     "@delegate/adapters-telegram": "workspace:*",
     "@delegate/domain": "workspace:*",

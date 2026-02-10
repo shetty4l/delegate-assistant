@@ -9,7 +9,7 @@ export type AppConfig = {
   sqlitePath: string;
   telegramBotToken: string | null;
   telegramPollIntervalMs: number;
-  modelProvider: "stub" | "opencode_cli";
+  modelProvider: "stub" | "opencode_cli" | "pi_agent";
   opencodeBin: string;
   modelName: string;
   assistantRepoPath: string;
@@ -24,6 +24,12 @@ export type AppConfig = {
   progressFirstMs: number;
   progressEveryMs: number;
   progressMaxCount: number;
+  piAgentProvider: string;
+  piAgentModel: string;
+  piAgentApiKey: string | null;
+  piAgentMaxSteps: number;
+  maxConcurrentTopics: number;
+  systemPromptPath: string | null;
 };
 
 type RawConfigFile = {
@@ -31,7 +37,7 @@ type RawConfigFile = {
   sqlitePath?: string;
   telegramBotToken?: string | null;
   telegramPollIntervalMs?: number;
-  modelProvider?: "stub" | "opencode_cli";
+  modelProvider?: "stub" | "opencode_cli" | "pi_agent";
   opencodeBin?: string;
   modelName?: string;
   assistantRepoPath?: string;
@@ -46,6 +52,12 @@ type RawConfigFile = {
   progressFirstMs?: number;
   progressEveryMs?: number;
   progressMaxCount?: number;
+  piAgentProvider?: string;
+  piAgentModel?: string;
+  piAgentApiKey?: string | null;
+  piAgentMaxSteps?: number;
+  maxConcurrentTopics?: number;
+  systemPromptPath?: string | null;
 };
 
 const defaultConfigPath = "~/.config/delegate-assistant/config.json";
@@ -119,12 +131,14 @@ const asOptionalNumber = (value: unknown): number | undefined => {
   return undefined;
 };
 
-const asModelProvider = (value: unknown): "stub" | "opencode_cli" => {
-  if (value === "stub" || value === "opencode_cli") {
+const asModelProvider = (
+  value: unknown,
+): "stub" | "opencode_cli" | "pi_agent" => {
+  if (value === "stub" || value === "opencode_cli" || value === "pi_agent") {
     return value;
   }
   throw new Error(
-    `MODEL_PROVIDER must be one of: stub, opencode_cli (received ${String(value)})`,
+    `MODEL_PROVIDER must be one of: stub, opencode_cli, pi_agent (received ${String(value)})`,
   );
 };
 
@@ -161,6 +175,12 @@ export const loadConfig = (): AppConfig => {
     "PROGRESS_FIRST_MS",
     "PROGRESS_EVERY_MS",
     "PROGRESS_MAX_COUNT",
+    "PI_AGENT_PROVIDER",
+    "PI_AGENT_MODEL",
+    "PI_AGENT_API_KEY",
+    "PI_AGENT_MAX_STEPS",
+    "MAX_CONCURRENT_TOPICS",
+    "SYSTEM_PROMPT_PATH",
   ].filter((key) => process.env[key] !== undefined).length;
 
   const port = Number(
@@ -250,6 +270,33 @@ export const loadConfig = (): AppConfig => {
       process.cwd(),
   );
 
+  const piAgentProvider =
+    process.env.PI_AGENT_PROVIDER?.trim() ||
+    asOptionalString(fileConfig.piAgentProvider) ||
+    "openai";
+  const piAgentModel =
+    process.env.PI_AGENT_MODEL?.trim() ||
+    asOptionalString(fileConfig.piAgentModel) ||
+    "gpt-4o-mini";
+  const piAgentApiKey =
+    process.env.PI_AGENT_API_KEY?.trim() ||
+    asOptionalNullableString(fileConfig.piAgentApiKey) ||
+    null;
+  const piAgentMaxSteps = Number(
+    process.env.PI_AGENT_MAX_STEPS ??
+      asOptionalNumber(fileConfig.piAgentMaxSteps) ??
+      "15",
+  );
+  const maxConcurrentTopics = Number(
+    process.env.MAX_CONCURRENT_TOPICS ??
+      asOptionalNumber(fileConfig.maxConcurrentTopics) ??
+      "3",
+  );
+  const systemPromptPath =
+    process.env.SYSTEM_PROMPT_PATH?.trim() ||
+    asOptionalNullableString(fileConfig.systemPromptPath) ||
+    null;
+
   if (!existsSync(assistantRepoPath)) {
     throw new Error(`ASSISTANT_REPO_PATH does not exist: ${assistantRepoPath}`);
   }
@@ -263,6 +310,12 @@ export const loadConfig = (): AppConfig => {
   asPositiveInt(progressFirstMs, "PROGRESS_FIRST_MS");
   asPositiveInt(progressEveryMs, "PROGRESS_EVERY_MS");
   asPositiveInt(progressMaxCount, "PROGRESS_MAX_COUNT");
+
+  if (modelProvider === "pi_agent" && !piAgentApiKey) {
+    throw new Error(
+      "PI_AGENT_API_KEY is required when modelProvider is pi_agent. Set it via config.json or the PI_AGENT_API_KEY environment variable.",
+    );
+  }
 
   return {
     configSourcePath,
@@ -286,5 +339,11 @@ export const loadConfig = (): AppConfig => {
     progressFirstMs,
     progressEveryMs,
     progressMaxCount,
+    piAgentProvider,
+    piAgentModel,
+    piAgentApiKey,
+    piAgentMaxSteps,
+    maxConcurrentTopics,
+    systemPromptPath,
   };
 };

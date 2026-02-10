@@ -1,0 +1,15 @@
+{
+  "name": "@delegate/adapters-model-pi-agent",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@delegate/domain": "workspace:*",
+    "@delegate/ports": "workspace:*",
+    "@mariozechner/pi-ai": "^0.52.9",
+    "@mariozechner/pi-agent-core": "^0.52.9",
+    "@sinclair/typebox": "^0.34.48"
+  }
+}

@@ -17,4 +17,9 @@ export type ModelTurnResponse = {
   sessionId?: string;
   mode?: "chat_reply" | "execution_proposal";
   confidence?: number;
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    cost: number;
+  };
 };
