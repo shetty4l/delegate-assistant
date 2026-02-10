@@ -23,5 +23,7 @@
   "opencodeAutoStart": true,
   "opencodeServeHost": "127.0.0.1",
   "opencodeServePort": 4096,
-  "shellCommandDenylist": []
+  "shellCommandDenylist": [],
+  "startupAnnounceChatId": null,
+  "startupAnnounceThreadId": null
 }

@@ -68,6 +68,8 @@ export type WorkerOptions = {
     chatId: string;
     threadId: string | null;
   }) => Promise<void> | void;
+  startupAnnounceChatId?: string | null;
+  startupAnnounceThreadId?: string | null;
 };
 
 export type LogFields = Record<string, string | number | boolean | null>;
