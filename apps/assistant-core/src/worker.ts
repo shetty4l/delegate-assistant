@@ -436,6 +436,33 @@ export const startTelegramWorker = (
       });
     }
 
+    if (options.startupAnnounceChatId) {
+      const version = options.buildInfo?.releaseVersion ?? "unknown";
+      try {
+        await sendMessage(
+          ctx,
+          deps.chatPort,
+          {
+            chatId: options.startupAnnounceChatId,
+            threadId: options.startupAnnounceThreadId ?? null,
+            text: `Delegate Assistant v${version} is online.`,
+          },
+          { action: "runtime", stage: "startup_announce" },
+        );
+        logInfo("startup_announce.sent", {
+          chatId: options.startupAnnounceChatId,
+          threadId: options.startupAnnounceThreadId ?? null,
+          version,
+        });
+      } catch (error) {
+        logError("startup_announce.failed", {
+          chatId: options.startupAnnounceChatId,
+          threadId: options.startupAnnounceThreadId ?? null,
+          error: String(error),
+        });
+      }
+    }
+
     if (deps.sessionStore) {
       try {
         cursor = await deps.sessionStore.getCursor();

@@ -22,5 +22,7 @@
   "opencodeAttachUrl": "http://127.0.0.1:4096",
   "opencodeAutoStart": true,
   "opencodeServeHost": "127.0.0.1",
-  "opencodeServePort": 4096
+  "opencodeServePort": 4096,
+  "startupAnnounceChatId": null,
+  "startupAnnounceThreadId": null
 }

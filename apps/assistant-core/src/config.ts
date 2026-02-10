@@ -31,6 +31,8 @@ export type AppConfig = {
   maxConcurrentTopics: number;
   systemPromptPath: string | null;
   piAgentEnableShellTool: boolean;
+  startupAnnounceChatId: string | null;
+  startupAnnounceThreadId: string | null;
 };
 
 type RawConfigFile = {
@@ -60,6 +62,8 @@ type RawConfigFile = {
   maxConcurrentTopics?: number;
   systemPromptPath?: string | null;
   piAgentEnableShellTool?: boolean;
+  startupAnnounceChatId?: string | null;
+  startupAnnounceThreadId?: string | null;
 };
 
 const defaultConfigPath = "~/.config/delegate-assistant/config.json";
@@ -184,6 +188,8 @@ export const loadConfig = (): AppConfig => {
     "MAX_CONCURRENT_TOPICS",
     "SYSTEM_PROMPT_PATH",
     "PI_AGENT_ENABLE_SHELL_TOOL",
+    "STARTUP_ANNOUNCE_CHAT_ID",
+    "STARTUP_ANNOUNCE_THREAD_ID",
   ].filter((key) => process.env[key] !== undefined).length;
 
   const port = Number(
@@ -303,6 +309,14 @@ export const loadConfig = (): AppConfig => {
     process.env.PI_AGENT_ENABLE_SHELL_TOOL !== undefined
       ? process.env.PI_AGENT_ENABLE_SHELL_TOOL.trim() !== "false"
       : (asOptionalBoolean(fileConfig.piAgentEnableShellTool) ?? true);
+  const startupAnnounceChatId =
+    process.env.STARTUP_ANNOUNCE_CHAT_ID?.trim() ||
+    asOptionalNullableString(fileConfig.startupAnnounceChatId) ||
+    null;
+  const startupAnnounceThreadId =
+    process.env.STARTUP_ANNOUNCE_THREAD_ID?.trim() ||
+    asOptionalNullableString(fileConfig.startupAnnounceThreadId) ||
+    null;
 
   if (!existsSync(assistantRepoPath)) {
     throw new Error(`Assistant repo path does not exist: ${assistantRepoPath}`);
@@ -384,5 +398,7 @@ export const loadConfig = (): AppConfig => {
     maxConcurrentTopics,
     systemPromptPath,
     piAgentEnableShellTool,
+    startupAnnounceChatId,
+    startupAnnounceThreadId,
   };
 };
