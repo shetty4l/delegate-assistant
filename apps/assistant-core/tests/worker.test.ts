@@ -1,12 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { BuildInfo } from "@assistant-core/src/version";
 import {
   flushPendingStartupAck,
   handleChatMessage,
+  WorkerContext,
 } from "@assistant-core/src/worker";
+import type { SessionStoreLike } from "@assistant-core/src/worker-types";
 import type {
   InboundMessage,
   ModelTurnResponse,
@@ -58,7 +60,7 @@ class ScriptedModel implements ModelPort {
   }
 }
 
-class MemorySessionStore {
+class MemorySessionStore implements SessionStoreLike {
   private readonly sessions = new Map<
     string,
     { opencodeSessionId: string; lastUsedAt: string }
@@ -159,20 +161,6 @@ const inbound = (
 
 const defaultWorkspace = process.cwd();
 
-const runGit = (cwd: string, args: string[]): void => {
-  const proc = Bun.spawnSync({
-    cmd: ["git", ...args],
-    cwd,
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  if (proc.exitCode !== 0) {
-    const stderr = new TextDecoder().decode(proc.stderr).trim();
-    const stdout = new TextDecoder().decode(proc.stdout).trim();
-    throw new Error(stderr || stdout || `git ${args.join(" ")} failed`);
-  }
-};
-
 const buildInfoFixture: BuildInfo = {
   service: "delegate-assistant",
   releaseVersion: "0.1.0",
@@ -191,11 +179,12 @@ const buildInfoFixture: BuildInfo = {
 const scopedSessionKey = (
   chatId: string,
   threadId: string | null,
-  workspacePath = defaultWorkspace,
-): string => JSON.stringify([`${chatId}:${threadId ?? "root"}`, workspacePath]);
+  _workspacePath = defaultWorkspace,
+): string => `${chatId}:${threadId ?? "root"}`;
 
 describe("telegram opencode relay", () => {
   test("handles /start only as first message", async () => {
+    const ctx = new WorkerContext();
     const chatPort = new CapturingChatPort();
     const model = new ScriptedModel(async () => ({
       mode: "chat_reply",
@@ -204,14 +193,23 @@ describe("telegram opencode relay", () => {
       sessionId: "ses-a",
     }));
 
-    await handleChatMessage({ chatPort, modelPort: model }, inbound("/start"));
-    await handleChatMessage({ chatPort, modelPort: model }, inbound("/start"));
+    await handleChatMessage(
+      ctx,
+      { chatPort, modelPort: model },
+      inbound("/start"),
+    );
+    await handleChatMessage(
+      ctx,
+      { chatPort, modelPort: model },
+      inbound("/start"),
+    );
 
     expect(chatPort.sent.length).toBe(1);
     expect(chatPort.sent[0]?.text).toContain("ready");
   });
 
   test("relays message and persists returned session id", async () => {
+    const ctx = new WorkerContext();
     const chatPort = new CapturingChatPort();
     const store = new MemorySessionStore();
     const model = new ScriptedModel(async (input) => ({
@@ -222,6 +220,7 @@ describe("telegram opencode relay", () => {
     }));
 
     await handleChatMessage(
+      ctx,
       { chatPort, modelPort: model, sessionStore: store },
       inbound("hello", "42"),
       { defaultWorkspacePath: defaultWorkspace },
@@ -234,103 +233,8 @@ describe("telegram opencode relay", () => {
     expect(persisted?.opencodeSessionId).toBe("ses-123");
   });
 
-  test("handles /sync with explicit path deterministically on successful git sync", async () => {
-    const chatPort = new CapturingChatPort();
-    const store = new MemorySessionStore();
-    const baseDir = await mkdtemp(join(tmpdir(), "delegate-sync-"));
-    const remoteRepo = join(baseDir, "remote.git");
-    const localRepo = join(baseDir, "local");
-    runGit(baseDir, ["init", "--bare", remoteRepo]);
-    runGit(baseDir, ["clone", remoteRepo, localRepo]);
-    runGit(localRepo, ["config", "user.email", "test@example.com"]);
-    runGit(localRepo, ["config", "user.name", "Test User"]);
-    await writeFile(join(localRepo, "README.md"), "hello\n", "utf8");
-    runGit(localRepo, ["add", "README.md"]);
-    runGit(localRepo, ["commit", "-m", "init"]);
-    runGit(localRepo, ["branch", "-M", "main"]);
-    runGit(localRepo, ["push", "-u", "origin", "main"]);
-
-    let modelCalls = 0;
-    const model = new ScriptedModel(async (input) => {
-      modelCalls += 1;
-      return {
-        mode: "chat_reply",
-        confidence: 1,
-        replyText: `fallback:${input.text}`,
-        sessionId: "ses-sync",
-      };
-    });
-
-    await handleChatMessage(
-      { chatPort, modelPort: model, sessionStore: store },
-      inbound(`/sync ${localRepo}`, null, "chat-sync"),
-      { defaultWorkspacePath: defaultWorkspace },
-    );
-
-    expect(modelCalls).toBe(0);
-    expect(chatPort.sent[0]?.text).toContain("Rebased onto `origin/main`");
-    expect(chatPort.sent[0]?.text).toContain(
-      "Branch status: ## main...origin/main",
-    );
-
-    await rm(baseDir, { recursive: true, force: true });
-  });
-
-  test("returns error for /sync when path does not exist", async () => {
-    const chatPort = new CapturingChatPort();
-    const store = new MemorySessionStore();
-    let modelCalls = 0;
-    const model = new ScriptedModel(async () => {
-      modelCalls += 1;
-      return {
-        mode: "chat_reply",
-        confidence: 1,
-        replyText: "should-not-be-called",
-        sessionId: "ses-sync-fallback",
-      };
-    });
-
-    await handleChatMessage(
-      { chatPort, modelPort: model, sessionStore: store },
-      inbound("/sync /nonexistent/path", null, "chat-sync-invalid"),
-      { defaultWorkspacePath: defaultWorkspace },
-    );
-
-    expect(modelCalls).toBe(0);
-    expect(chatPort.sent[0]?.text).toContain("Directory not found");
-  });
-
-  test("returns error for /sync when not in a git repo", async () => {
-    const chatPort = new CapturingChatPort();
-    const store = new MemorySessionStore();
-    let modelCalls = 0;
-    const model = new ScriptedModel(async () => {
-      modelCalls += 1;
-      return {
-        mode: "chat_reply",
-        confidence: 1,
-        replyText: "should-not-be-called",
-        sessionId: "ses-sync-fallback",
-      };
-    });
-
-    const nonRepoWorkspace = await mkdtemp(
-      join(tmpdir(), "delegate-not-repo-"),
-    );
-
-    await handleChatMessage(
-      { chatPort, modelPort: model, sessionStore: store },
-      inbound(`/sync ${nonRepoWorkspace}`, null, "chat-sync-not-git"),
-      { defaultWorkspacePath: defaultWorkspace },
-    );
-
-    expect(modelCalls).toBe(0);
-    expect(chatPort.sent[0]?.text).toContain("Sync failed");
-
-    await rm(nonRepoWorkspace, { recursive: true, force: true });
-  });
-
   test("retries once with fresh session when resumed session fails", async () => {
+    const ctx = new WorkerContext();
     const chatPort = new CapturingChatPort();
     const store = new MemorySessionStore();
     await store.upsertSession({
@@ -355,6 +259,7 @@ describe("telegram opencode relay", () => {
     });
 
     await handleChatMessage(
+      ctx,
       { chatPort, modelPort: model, sessionStore: store },
       inbound("continue"),
       { sessionRetryAttempts: 1, defaultWorkspacePath: defaultWorkspace },
@@ -372,6 +277,7 @@ describe("telegram opencode relay", () => {
   });
 
   test("times out a hung resumed session without staling mapping", async () => {
+    const ctx = new WorkerContext();
     const chatPort = new CapturingChatPort();
     const store = new MemorySessionStore();
     await store.upsertSession({
@@ -398,6 +304,7 @@ describe("telegram opencode relay", () => {
     });
 
     await handleChatMessage(
+      ctx,
       { chatPort, modelPort: model, sessionStore: store },
       inbound("hello", null, "chat-timeout-retry"),
       {
@@ -412,6 +319,7 @@ describe("telegram opencode relay", () => {
   });
 
   test("sends fallback message after timeout and failed retry", async () => {
+    const ctx = new WorkerContext();
     const chatPort = new CapturingChatPort();
     const store = new MemorySessionStore();
 
@@ -420,6 +328,7 @@ describe("telegram opencode relay", () => {
     });
 
     await handleChatMessage(
+      ctx,
       { chatPort, modelPort: model, sessionStore: store },
       inbound("hello", null, "chat-timeout-fail"),
       {
@@ -433,6 +342,7 @@ describe("telegram opencode relay", () => {
   });
 
   test("retries delivery without thread on telegram 400", async () => {
+    const ctx = new WorkerContext();
     const chatPort = new Thread400ThenSuccessChatPort();
     const store = new MemorySessionStore();
     const model = new ScriptedModel(async () => ({
@@ -443,6 +353,7 @@ describe("telegram opencode relay", () => {
     }));
 
     await handleChatMessage(
+      ctx,
       { chatPort, modelPort: model, sessionStore: store },
       inbound("hello", "129", "chat-telegram-400"),
       { defaultWorkspacePath: defaultWorkspace },
@@ -454,6 +365,7 @@ describe("telegram opencode relay", () => {
   });
 
   test("sends progress updates for long-running turns", async () => {
+    const ctx = new WorkerContext();
     const chatPort = new CapturingChatPort();
     const store = new MemorySessionStore();
     const model = new ScriptedModel(
@@ -471,6 +383,7 @@ describe("telegram opencode relay", () => {
     );
 
     await handleChatMessage(
+      ctx,
       { chatPort, modelPort: model, sessionStore: store },
       inbound("analyze this", null, "chat-progress"),
       {
@@ -488,6 +401,7 @@ describe("telegram opencode relay", () => {
   });
 
   test("handles restart as deterministic control intent", async () => {
+    const ctx = new WorkerContext();
     const chatPort = new CapturingChatPort();
     const store = new MemorySessionStore();
     let modelCalls = 0;
@@ -503,6 +417,7 @@ describe("telegram opencode relay", () => {
     });
 
     await handleChatMessage(
+      ctx,
       { chatPort, modelPort: model, sessionStore: store },
       inbound("restart assistant", null, "chat-restart"),
       {
@@ -521,6 +436,7 @@ describe("telegram opencode relay", () => {
   });
 
   test("handles /restart as deterministic control intent", async () => {
+    const ctx = new WorkerContext();
     const chatPort = new CapturingChatPort();
     const store = new MemorySessionStore();
     let modelCalls = 0;
@@ -536,6 +452,7 @@ describe("telegram opencode relay", () => {
     });
 
     await handleChatMessage(
+      ctx,
       { chatPort, modelPort: model, sessionStore: store },
       inbound("/restart", null, "chat-restart-slash"),
       {
@@ -554,6 +471,7 @@ describe("telegram opencode relay", () => {
   });
 
   test("flushes pending startup ack and clears marker", async () => {
+    const ctx = new WorkerContext();
     const chatPort = new CapturingChatPort();
     const store = new MemorySessionStore();
     await store.upsertPendingStartupAck({
@@ -564,7 +482,7 @@ describe("telegram opencode relay", () => {
       lastError: null,
     });
 
-    await flushPendingStartupAck({
+    await flushPendingStartupAck(ctx, {
       chatPort,
       modelPort: new ScriptedModel(async () => ({ replyText: "unused" })),
       sessionStore: store,
@@ -578,6 +496,7 @@ describe("telegram opencode relay", () => {
   });
 
   test("retains pending startup ack when send fails", async () => {
+    const ctx = new WorkerContext();
     const chatPort = new FailingChatPort();
     const store = new MemorySessionStore();
     await store.upsertPendingStartupAck({
@@ -588,7 +507,7 @@ describe("telegram opencode relay", () => {
       lastError: null,
     });
 
-    await flushPendingStartupAck({
+    await flushPendingStartupAck(ctx, {
       chatPort,
       modelPort: new ScriptedModel(async () => ({ replyText: "unused" })),
       sessionStore: store,
@@ -600,6 +519,7 @@ describe("telegram opencode relay", () => {
   });
 
   test("handles /version as deterministic control intent", async () => {
+    const ctx = new WorkerContext();
     const chatPort = new CapturingChatPort();
     const store = new MemorySessionStore();
     let modelCalls = 0;
@@ -614,6 +534,7 @@ describe("telegram opencode relay", () => {
     });
 
     await handleChatMessage(
+      ctx,
       { chatPort, modelPort: model, sessionStore: store },
       inbound("/version", null, "chat-version-slash"),
       {
@@ -628,6 +549,7 @@ describe("telegram opencode relay", () => {
   });
 
   test("does not delegate unknown slash command to model", async () => {
+    const ctx = new WorkerContext();
     const chatPort = new CapturingChatPort();
     const store = new MemorySessionStore();
     let modelCalls = 0;
@@ -642,6 +564,7 @@ describe("telegram opencode relay", () => {
     });
 
     await handleChatMessage(
+      ctx,
       { chatPort, modelPort: model, sessionStore: store },
       inbound("/unknown", null, "chat-unknown-slash"),
       {
@@ -653,7 +576,8 @@ describe("telegram opencode relay", () => {
     expect(chatPort.sent[0]?.text).toContain("Unknown slash command");
   });
 
-  test("keeps separate sessions per workspace in one topic", async () => {
+  test("keeps same session when workspace changes within one topic", async () => {
+    const ctx = new WorkerContext();
     const chatPort = new CapturingChatPort();
     const store = new MemorySessionStore();
     const baseDir = await mkdtemp(join(tmpdir(), "delegate-worker-"));
@@ -663,19 +587,11 @@ describe("telegram opencode relay", () => {
     const seenInputs: RespondInput[] = [];
     const model = new ScriptedModel(async (input) => {
       seenInputs.push(input);
-      if (input.workspacePath === repoA && !input.sessionId) {
-        return {
-          mode: "chat_reply",
-          confidence: 1,
-          replyText: "a-first",
-          sessionId: "ses-a",
-        };
-      }
       return {
         mode: "chat_reply",
         confidence: 1,
-        replyText: `resume:${input.sessionId ?? "none"}`,
-        sessionId: input.sessionId ?? "missing",
+        replyText: `reply:${input.sessionId ?? "new"}`,
+        sessionId: input.sessionId ?? "ses-a",
       };
     });
 
@@ -690,21 +606,21 @@ describe("telegram opencode relay", () => {
     const opts = { defaultWorkspacePath: repoA };
 
     await handleChatMessage(
+      ctx,
       deps,
-      inbound("first in a", "42", "chat-multi"),
+      inbound("first msg", "42", "chat-multi"),
       opts,
     );
     await handleChatMessage(
+      ctx,
       deps,
-      inbound("second in a", "42", "chat-multi"),
+      inbound("second msg", "42", "chat-multi"),
       opts,
     );
 
     expect(seenInputs.length).toBe(2);
-    expect(seenInputs[0]?.workspacePath).toBe(repoA);
     expect(seenInputs[0]?.sessionId).toBeNull();
-    expect(seenInputs[1]?.workspacePath).toBe(repoA);
-    expect(seenInputs[1]?.sessionId).toBe("ses-a");
+    expect(seenInputs[1]?.sessionId).toBe("ses-a"); // Same session reused
 
     await rm(baseDir, { recursive: true, force: true });
   });

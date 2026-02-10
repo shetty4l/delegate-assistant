@@ -153,10 +153,18 @@ setup_config() {
     info "Using TELEGRAM_BOT_TOKEN from environment"
   fi
 
+  local api_key="${PI_AGENT_API_KEY:-}"
+  if [ -z "$api_key" ]; then
+    api_key=$(prompt_value "PI_AGENT_API_KEY" "OpenAI API key for pi-agent (required)")
+  else
+    info "Using PI_AGENT_API_KEY from environment"
+  fi
+
   # write secrets
   cat > "$SECRETS_FILE" << EOF
 # delegate-assistant secrets -- do not commit
 TELEGRAM_BOT_TOKEN=${bot_token}
+PI_AGENT_API_KEY=${api_key}
 EOF
   chmod 600 "$SECRETS_FILE"
   ok "Wrote secrets to ${SECRETS_FILE}"
@@ -167,8 +175,11 @@ EOF
   "port": 3000,
   "sqlitePath": "~/.local/share/delegate-assistant/data/assistant.db",
   "telegramPollIntervalMs": 2000,
-  "modelProvider": "opencode_cli",
-  "opencodeBin": "opencode",
+  "modelProvider": "pi_agent",
+  "piAgentProvider": "openai",
+  "piAgentModel": "gpt-4o-mini",
+  "piAgentMaxSteps": 15,
+  "maxConcurrentTopics": 3,
   "assistantRepoPath": "${HOME}/dev",
   "sessionIdleTimeoutMs": 2700000,
   "sessionMaxConcurrent": 5,

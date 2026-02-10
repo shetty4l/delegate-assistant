@@ -21,6 +21,9 @@
       "@delegate/adapters-model-stub/*": ["packages/adapters-model-stub/src/*"],
       "@delegate/adapters-session-store-sqlite/*": [
         "packages/adapters-session-store-sqlite/src/*"
+      ],
+      "@delegate/adapters-model-pi-agent/*": [
+        "packages/adapters-model-pi-agent/src/*"
       ]
     }
   }

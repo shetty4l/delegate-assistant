@@ -11,6 +11,7 @@ import {
 } from "@assistant-core/src/version";
 import { startTelegramWorker } from "@assistant-core/src/worker";
 import { OpencodeCliModelAdapter } from "@delegate/adapters-model-opencode-cli";
+import { PiAgentModelAdapter } from "@delegate/adapters-model-pi-agent";
 import { DeterministicModelStub } from "@delegate/adapters-model-stub";
 import { TelegramLongPollingAdapter } from "@delegate/adapters-telegram";
 
@@ -228,7 +229,16 @@ const runWorkerProcess = async (): Promise<number> => {
           attachUrl: config.opencodeAttachUrl,
           responseTimeoutMs: config.relayTimeoutMs,
         })
-      : new DeterministicModelStub();
+      : config.modelProvider === "pi_agent"
+        ? new PiAgentModelAdapter({
+            provider: config.piAgentProvider,
+            model: config.piAgentModel,
+            apiKey: config.piAgentApiKey ?? undefined,
+            maxSteps: config.piAgentMaxSteps,
+            workspacePath: config.assistantRepoPath,
+            systemPromptPath: config.systemPromptPath ?? undefined,
+          })
+        : new DeterministicModelStub();
 
   await sessionStore.init();
 

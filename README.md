@@ -1,28 +1,36 @@
 # Delegate Assistant
 
-Delegate Assistant is a lightweight Telegram-to-OpenCode bridge.
+Delegate Assistant is a Telegram-based AI chief of staff powered by pi-agent.
 
 The runtime is intentionally thin:
-- Telegram is chat interface.
-- OpenCode handles execution behavior and safety controls.
-- This wrapper handles message relay, topic-aware session continuity, and basic service health.
+- Telegram is the chat interface.
+- pi-agent (with configurable LLM provider) handles execution, tool use, and reasoning.
+- This wrapper handles message relay, per-topic concurrency, session persistence, and service health.
 
 ## Code Organization
 
 Clean hexagonal architecture with workspace aliases:
-- **6 active packages** (removed 4 empty packages)
+- **7 active packages** in a Bun monorepo
 - **Workspace aliases** for clean imports across modules
 - **Test separation** with `src/` (production) and `tests/` directories
-- **File size targets**: 200-250 LOC max (current refactoring in R7.A/R7.B)
 
-**Current Runtime Entry Points:**
-- `apps/assistant-core/src/main.ts` (443 LOC)
-- `apps/assistant-core/src/worker.ts` (996 LOC)
-- `apps/assistant-core/src/http.ts` (115 LOC)
-- `apps/assistant-core/src/session-store.ts` (SQLite adapter)
-- `packages/adapters-telegram/src/index.ts`
-- `packages/adapters-model-opencode-cli/src/index.ts`
-- `packages/adapters-session-store-sqlite/src/index.ts`
+**Core Modules (`apps/assistant-core/src/`):**
+- `main.ts` -- supervisor + worker entrypoint
+- `worker.ts` -- thin orchestrator (~270 LOC)
+- `concurrency.ts` -- per-topic queues + semaphore
+- `relay.ts` -- model relay with retry, timeout, progress
+- `session.ts` -- in-memory + SQLite session persistence
+- `workspace.ts` -- per-topic workspace management
+- `slash-commands.ts` -- `/start`, `/restart`, `/version`, `/workspace`
+- `messaging.ts` -- Telegram delivery with 400-retry
+- `config.ts` -- config loading with env var overrides
+- `http.ts` -- health check HTTP server
+
+**Adapter Packages:**
+- `packages/adapters-model-pi-agent/` -- pi-agent LLM adapter (default)
+- `packages/adapters-model-opencode-cli/` -- OpenCode CLI adapter (legacy)
+- `packages/adapters-telegram/` -- Telegram long-polling adapter
+- `packages/adapters-session-store-sqlite/` -- SQLite session store
 
 ## Current Status
 
@@ -41,8 +49,8 @@ bun run dev                # Start assistant with supervisor
 bun run dev:web            # Start session manager UI
 
 # Quality Gates
-bun run validate           # Run all checks (test, build, lint, format)
-bun run test               # Run tests
+bun run verify             # Run all checks (typecheck, format, lint, build, test, docs)
+bun run test               # Run tests only
 ```
 
 ## Quality Status
@@ -106,7 +114,7 @@ Three macOS LaunchAgents manage the services:
 
 | Service | Label | Description |
 |---------|-------|-------------|
-| Assistant | `com.suyash.delegate-assistant` | Telegram bot + OpenCode relay |
+| Assistant | `com.suyash.delegate-assistant` | Telegram bot + pi-agent relay |
 | Web Dashboard | `com.suyash.delegate-session-manager` | Astro SSR session viewer on :4321 |
 | Auto-Updater | `com.suyash.delegate-assistant-updater` | Checks for new releases every 5 min |
 
@@ -153,6 +161,12 @@ Database path resolution order:
 Security posture:
 - Bind to localhost only.
 - Publish access through Tailscale tailnet, not public internet.
+
+### Secrets
+
+The installer writes secrets to `~/.config/delegate-assistant/secrets.env`:
+- `TELEGRAM_BOT_TOKEN` -- Telegram bot API token
+- `PI_AGENT_API_KEY` -- OpenAI (or other provider) API key for pi-agent
 
 Power settings (Mac mini server baseline):
 - Apply: `sudo pmset -c sleep 0 standby 0 autorestart 1 powernap 0`
