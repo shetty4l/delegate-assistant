@@ -237,10 +237,6 @@ const runWorkerProcess = async (): Promise<number> => {
             systemPromptPath: config.systemPromptPath ?? undefined,
             gitIdentity: process.env.GIT_AUTHOR_NAME,
             enableShellTool: config.piAgentEnableShellTool,
-            shellCommandDenylist:
-              config.shellCommandDenylist.length > 0
-                ? config.shellCommandDenylist
-                : undefined,
           })
         : new DeterministicModelStub();
 

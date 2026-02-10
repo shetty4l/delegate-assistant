@@ -9,6 +9,7 @@ import {
   WorkerContext,
 } from "@assistant-core/src/worker";
 import type { SessionStoreLike } from "@assistant-core/src/worker-types";
+import { TelegramApiError } from "@delegate/adapters-telegram";
 import type {
   InboundMessage,
   ModelTurnResponse,
@@ -42,7 +43,7 @@ class FailingChatPort extends CapturingChatPort {
 class Thread400ThenSuccessChatPort extends CapturingChatPort {
   override async send(message: OutboundMessage): Promise<void> {
     if (message.threadId) {
-      throw new Error("Telegram sendMessage failed: 400");
+      throw new TelegramApiError(400, "sendMessage");
     }
     this.sent.push(message);
   }

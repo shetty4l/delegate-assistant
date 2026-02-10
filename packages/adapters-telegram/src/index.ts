@@ -21,6 +21,22 @@ type TelegramSendMessageResponse = {
   ok: boolean;
 };
 
+/**
+ * Structured error for Telegram API HTTP failures.
+ * Enables reliable error handling via `instanceof` instead of fragile string matching.
+ */
+export class TelegramApiError extends Error {
+  readonly statusCode: number;
+  readonly method: string;
+
+  constructor(statusCode: number, method: string) {
+    super(`Telegram ${method} failed: ${statusCode}`);
+    this.name = "TelegramApiError";
+    this.statusCode = statusCode;
+    this.method = method;
+  }
+}
+
 export class TelegramLongPollingAdapter implements ChatPort {
   private readonly baseUrl: string;
 
@@ -44,7 +60,7 @@ export class TelegramLongPollingAdapter implements ChatPort {
     });
 
     if (!response.ok) {
-      throw new Error(`Telegram getUpdates failed: ${response.status}`);
+      throw new TelegramApiError(response.status, "getUpdates");
     }
 
     const decoded = (await response.json()) as TelegramGetUpdatesResponse;
@@ -82,7 +98,7 @@ export class TelegramLongPollingAdapter implements ChatPort {
     });
 
     if (!response.ok) {
-      throw new Error(`Telegram sendMessage failed: ${response.status}`);
+      throw new TelegramApiError(response.status, "sendMessage");
     }
 
     const decoded = (await response.json()) as TelegramSendMessageResponse;
