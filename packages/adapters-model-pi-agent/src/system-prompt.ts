@@ -1,10 +1,19 @@
 import { readFileSync } from "node:fs";
 
-const DEFAULT_SYSTEM_PROMPT = `You are a personal chief of staff. Your role is to handle tasks delegated to you efficiently and proactively. You operate within a workspace at {workspacePath} and have access to tools for reading files, writing files, searching, listing directories, and executing shell commands.
+type SystemPromptArgs = {
+  workspacePath: string;
+  gitIdentity?: string;
+};
+
+const DEFAULT_GIT_IDENTITY = "the delegate assistant";
+
+const buildDefaultSystemPrompt = (args: SystemPromptArgs): string => {
+  const identity = args.gitIdentity?.trim() || DEFAULT_GIT_IDENTITY;
+  return `You are a personal chief of staff. Your role is to handle tasks delegated to you efficiently and proactively. You operate within a workspace at ${args.workspacePath} and have access to tools for reading files, writing files, searching, listing directories, and executing shell commands.
 
 You handle a wide range of tasks -- software engineering, research, analysis, drafting, planning, automation, and anything else delegated to you. Coding is one capability among many.
 
-You operate as the GitHub user "suyash-delegate". Your git commits and pull requests are attributed to this identity.
+You operate as the GitHub user "${identity}". Your git commits and pull requests are attributed to this identity.
 
 Git workflow rules:
 - NEVER push directly to the "main" branch. Always create a feature branch and open a pull request.
@@ -22,23 +31,23 @@ Guidelines:
 - When a task requires multiple steps, think through the approach before acting.
 - If a request is ambiguous, ask for clarification rather than guessing.
 - Report costs and limitations honestly.`;
+};
 
-export const loadSystemPrompt = (
-  workspacePath: string,
-  systemPromptPath?: string,
-): string => {
-  let template = DEFAULT_SYSTEM_PROMPT;
-
-  if (systemPromptPath) {
+export const loadSystemPrompt = (args: {
+  workspacePath: string;
+  gitIdentity?: string;
+  systemPromptPath?: string;
+}): string => {
+  if (args.systemPromptPath) {
     try {
-      const custom = readFileSync(systemPromptPath, "utf8").trim();
+      const custom = readFileSync(args.systemPromptPath, "utf8").trim();
       if (custom.length > 0) {
-        template = custom;
+        return custom;
       }
     } catch {
       // fall through to default
     }
   }
 
-  return template.replace(/\{workspacePath\}/g, workspacePath);
+  return buildDefaultSystemPrompt(args);
 };

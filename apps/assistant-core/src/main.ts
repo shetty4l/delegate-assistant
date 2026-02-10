@@ -237,6 +237,8 @@ const runWorkerProcess = async (): Promise<number> => {
             maxSteps: config.piAgentMaxSteps,
             workspacePath: config.assistantRepoPath,
             systemPromptPath: config.systemPromptPath ?? undefined,
+            gitIdentity: process.env.GIT_AUTHOR_NAME,
+            enableShellTool: config.piAgentEnableShellTool,
           })
         : new DeterministicModelStub();
 

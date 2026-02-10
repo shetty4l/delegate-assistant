@@ -47,11 +47,14 @@ export class PiAgentModelAdapter implements ModelPort {
       this.config.provider as any,
       this.config.model as any,
     );
-    const systemPrompt = loadSystemPrompt(
-      this.config.workspacePath,
-      this.config.systemPromptPath,
-    );
-    const tools = createWorkspaceTools(this.config.workspacePath);
+    const systemPrompt = loadSystemPrompt({
+      workspacePath: this.config.workspacePath,
+      systemPromptPath: this.config.systemPromptPath,
+      gitIdentity: this.config.gitIdentity,
+    });
+    const tools = createWorkspaceTools(this.config.workspacePath, {
+      enableShellTool: this.config.enableShellTool,
+    });
 
     const agent = new Agent({
       getApiKey: () => this.config.apiKey,
@@ -71,12 +74,15 @@ export class PiAgentModelAdapter implements ModelPort {
 
     // Update workspace-scoped tools if workspace changed
     if (input.workspacePath) {
-      const tools = createWorkspaceTools(input.workspacePath);
+      const tools = createWorkspaceTools(input.workspacePath, {
+        enableShellTool: this.config.enableShellTool,
+      });
       agent.setTools(tools);
-      const systemPrompt = loadSystemPrompt(
-        input.workspacePath,
-        this.config.systemPromptPath,
-      );
+      const systemPrompt = loadSystemPrompt({
+        workspacePath: input.workspacePath,
+        systemPromptPath: this.config.systemPromptPath,
+        gitIdentity: this.config.gitIdentity,
+      });
       agent.setSystemPrompt(systemPrompt);
     }
 
