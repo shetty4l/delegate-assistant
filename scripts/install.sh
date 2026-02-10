@@ -221,6 +221,34 @@ setup_config() {
 TELEGRAM_BOT_TOKEN=${bot_token}
 ${env_var_name}=${api_key}
 EOF
+
+  # optional: delegate GitHub identity
+  echo ""
+  info "Optional: delegate GitHub identity (for git commits and PRs as the assistant)"
+  local gh_token=""
+  printf 'Delegate GitHub token (classic PAT with public_repo scope, press Enter to skip): ' >&2
+  read -r gh_token < /dev/tty
+  if [ -n "$gh_token" ]; then
+    local gh_username=""
+    local gh_email=""
+    printf 'Delegate GitHub username [suyash-delegate]: ' >&2
+    read -r gh_username < /dev/tty
+    gh_username="${gh_username:-suyash-delegate}"
+    printf 'Delegate GitHub email [suyash.delegate@gmail.com]: ' >&2
+    read -r gh_email < /dev/tty
+    gh_email="${gh_email:-suyash.delegate@gmail.com}"
+    cat >> "$SECRETS_FILE" << EOF
+DELEGATE_GITHUB_TOKEN=${gh_token}
+GIT_AUTHOR_NAME=${gh_username}
+GIT_AUTHOR_EMAIL=${gh_email}
+GIT_COMMITTER_NAME=${gh_username}
+GIT_COMMITTER_EMAIL=${gh_email}
+EOF
+    ok "Delegate GitHub identity configured (${gh_username})"
+  else
+    info "Skipped delegate GitHub identity setup"
+  fi
+
   chmod 600 "$SECRETS_FILE"
   ok "Wrote secrets to ${SECRETS_FILE}"
 
