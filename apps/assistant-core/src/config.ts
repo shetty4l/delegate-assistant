@@ -273,11 +273,11 @@ export const loadConfig = (): AppConfig => {
   const piAgentProvider =
     process.env.PI_AGENT_PROVIDER?.trim() ||
     asOptionalString(fileConfig.piAgentProvider) ||
-    "openai";
+    "openrouter";
   const piAgentModel =
     process.env.PI_AGENT_MODEL?.trim() ||
     asOptionalString(fileConfig.piAgentModel) ||
-    "gpt-4o-mini";
+    "openrouter/auto";
   const piAgentApiKey =
     process.env.PI_AGENT_API_KEY?.trim() ||
     asOptionalNullableString(fileConfig.piAgentApiKey) ||
@@ -312,9 +312,24 @@ export const loadConfig = (): AppConfig => {
   asPositiveInt(progressMaxCount, "PROGRESS_MAX_COUNT");
 
   if (modelProvider === "pi_agent" && !piAgentApiKey) {
-    throw new Error(
-      "PI_AGENT_API_KEY is required when modelProvider is pi_agent. Set it via config.json or the PI_AGENT_API_KEY environment variable.",
-    );
+    const providerEnvVars: Record<string, string> = {
+      openrouter: "OPENROUTER_API_KEY",
+      groq: "GROQ_API_KEY",
+      google: "GEMINI_API_KEY",
+      cerebras: "CEREBRAS_API_KEY",
+      openai: "OPENAI_API_KEY",
+      anthropic: "ANTHROPIC_API_KEY",
+    };
+    const expectedVar = providerEnvVars[piAgentProvider];
+    const hasProviderKey = expectedVar ? !!process.env[expectedVar] : false;
+    if (!hasProviderKey) {
+      const hint = expectedVar
+        ? `Set PI_AGENT_API_KEY or ${expectedVar}`
+        : "Set PI_AGENT_API_KEY";
+      throw new Error(
+        `${hint} when modelProvider is pi_agent (provider: ${piAgentProvider}).`,
+      );
+    }
   }
 
   return {

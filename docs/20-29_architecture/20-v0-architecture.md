@@ -116,7 +116,8 @@ Active contracts:
 
 Active adapters:
 - `packages/adapters-telegram`
-- `packages/adapters-model-opencode-cli`
+- `packages/adapters-model-pi-agent` (default)
+- `packages/adapters-model-opencode-cli` (legacy)
 - `apps/assistant-core/src/session-store.ts`
 
 Legacy workflow-oriented modules may remain in repo history but are not part of runtime path.
@@ -158,6 +159,12 @@ Primary source:
 
 Key settings:
 - Telegram: token, poll interval
-- OpenCode: binary, model, attach URL, auto-start host/port
+- Model: provider (`stub|opencode_cli|pi_agent`), pi-agent provider/model/max steps
+- OpenCode (legacy): binary, model, attach URL, auto-start host/port
 - Sessions: idle timeout, max concurrent, retry attempts
 - Relay behavior: timeout, progress first interval, progress repeat interval, progress max count
+- Concurrency: max concurrent topics
+
+API keys are stored in `~/.config/delegate-assistant/secrets.env` (not in config.json).
+Provider-specific env vars (e.g., `OPENROUTER_API_KEY`, `GROQ_API_KEY`, `GEMINI_API_KEY`)
+are resolved by pi-ai at runtime. `PI_AGENT_API_KEY` is accepted as a universal override.

@@ -21,9 +21,17 @@ Knowledge Index (Johnny Decimal)
 - `apps/assistant-core/src/main.ts`
 - `apps/assistant-core/src/worker.ts`
 - `apps/assistant-core/src/http.ts`
+- `apps/assistant-core/src/config.ts`
+- `apps/assistant-core/src/concurrency.ts`
+- `apps/assistant-core/src/relay.ts`
+- `apps/assistant-core/src/session.ts`
+- `apps/assistant-core/src/workspace.ts`
+- `apps/assistant-core/src/slash-commands.ts`
+- `apps/assistant-core/src/messaging.ts`
 - `apps/assistant-core/src/opencode-server.ts`
 - `apps/assistant-core/src/session-store.ts`
 - `packages/adapters-telegram/src/index.ts`
+- `packages/adapters-model-pi-agent/src/index.ts`
 - `packages/adapters-model-opencode-cli/src/index.ts`
 - `packages/domain/src/index.ts`
 - `packages/ports/src/index.ts`
