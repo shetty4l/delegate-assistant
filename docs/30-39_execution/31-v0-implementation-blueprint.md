@@ -97,7 +97,7 @@ Required keys:
 - `sqlitePath`
 - `telegramBotToken`
 - `telegramPollIntervalMs`
-- `modelProvider` (`stub|opencode_cli`)
+- `modelProvider` (`stub|opencode_cli|pi_agent`)
 - `opencodeBin`
 - `modelName`
 - `assistantRepoPath`
@@ -112,6 +112,11 @@ Required keys:
 - `progressFirstMs`
 - `progressEveryMs`
 - `progressMaxCount`
+- `piAgentProvider` (default: `openrouter`)
+- `piAgentModel` (default: `openrouter/auto`)
+- `piAgentMaxSteps` (default: `15`)
+- `maxConcurrentTopics` (default: `3`)
+- `systemPromptPath` (optional)
 
 Optional env overrides:
 - `PORT`, `SQLITE_PATH`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_POLL_INTERVAL_MS`
@@ -119,16 +124,29 @@ Optional env overrides:
 - `OPENCODE_ATTACH_URL`, `OPENCODE_AUTO_START`, `OPENCODE_SERVE_HOST`, `OPENCODE_SERVE_PORT`
 - `SESSION_IDLE_TIMEOUT_MS`, `SESSION_MAX_CONCURRENT`, `SESSION_RETRY_ATTEMPTS`
 - `RELAY_TIMEOUT_MS`, `PROGRESS_FIRST_MS`, `PROGRESS_EVERY_MS`, `PROGRESS_MAX_COUNT`
+- `PI_AGENT_PROVIDER`, `PI_AGENT_MODEL`, `PI_AGENT_API_KEY`, `PI_AGENT_MAX_STEPS`
+- `MAX_CONCURRENT_TOPICS`, `SYSTEM_PROMPT_PATH`
+
+Provider-specific API key env vars (resolved by pi-ai, not config.ts):
+- `OPENROUTER_API_KEY`, `GROQ_API_KEY`, `GEMINI_API_KEY`
+- `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `CEREBRAS_API_KEY`
 
 ## 7. In-Scope Packages
 
 Hot path:
 - `apps/assistant-core/src/main.ts`
 - `apps/assistant-core/src/worker.ts`
+- `apps/assistant-core/src/config.ts`
+- `apps/assistant-core/src/concurrency.ts`
+- `apps/assistant-core/src/relay.ts`
+- `apps/assistant-core/src/session.ts`
+- `apps/assistant-core/src/workspace.ts`
+- `apps/assistant-core/src/messaging.ts`
 - `apps/assistant-core/src/http.ts`
 - `apps/assistant-core/src/opencode-server.ts`
 - `apps/assistant-core/src/session-store.ts`
 - `packages/adapters-telegram/src/index.ts`
+- `packages/adapters-model-pi-agent/src/index.ts`
 - `packages/adapters-model-opencode-cli/src/index.ts`
 
 Legacy workflow-oriented modules may remain in the repository but are not part of the relay runtime path.

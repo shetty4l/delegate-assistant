@@ -88,6 +88,8 @@ The installer will:
 - Install to `~/srv/delegate-assistant/<version>/`
 - Run `bun install` and build the web dashboard
 - Prompt for the Telegram bot token
+- Prompt for LLM provider selection (default: OpenRouter)
+- Prompt for the provider-specific API key
 - Write config to `~/.config/delegate-assistant/`
 - Set up macOS LaunchAgents for auto-start and auto-update
 
@@ -105,7 +107,7 @@ The installer will:
 
 ~/.config/delegate-assistant/
   config.json                 # Application config (non-sensitive)
-  secrets.env                 # TELEGRAM_BOT_TOKEN (chmod 600)
+  secrets.env                 # TELEGRAM_BOT_TOKEN + LLM API key (chmod 600)
 ```
 
 ### LaunchAgents
@@ -166,7 +168,18 @@ Security posture:
 
 The installer writes secrets to `~/.config/delegate-assistant/secrets.env`:
 - `TELEGRAM_BOT_TOKEN` -- Telegram bot API token
-- `PI_AGENT_API_KEY` -- OpenAI (or other provider) API key for pi-agent
+- Provider-specific LLM API key (one of the following):
+
+| Provider | Env Var | Notes |
+|----------|---------|-------|
+| OpenRouter (default) | `OPENROUTER_API_KEY` | Supports `openrouter/auto` model routing |
+| Groq | `GROQ_API_KEY` | Free tier: 30 RPM / 1K RPD |
+| Google Gemini | `GEMINI_API_KEY` | Free tier: 15 RPM / 1500 RPD |
+| OpenAI | `OPENAI_API_KEY` | Paid |
+| Anthropic | `ANTHROPIC_API_KEY` | Paid |
+| Cerebras | `CEREBRAS_API_KEY` | Free tier available |
+
+`PI_AGENT_API_KEY` is also accepted as a universal override for any provider.
 
 Power settings (Mac mini server baseline):
 - Apply: `sudo pmset -c sleep 0 standby 0 autorestart 1 powernap 0`

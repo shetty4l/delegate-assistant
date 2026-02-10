@@ -26,6 +26,12 @@ const baseConfig = (): AppConfig => ({
   progressFirstMs: 10_000,
   progressEveryMs: 30_000,
   progressMaxCount: 3,
+  piAgentProvider: "openrouter",
+  piAgentModel: "openrouter/auto",
+  piAgentApiKey: null,
+  piAgentMaxSteps: 15,
+  maxConcurrentTopics: 3,
+  systemPromptPath: null,
 });
 
 const buildInfoFixture: BuildInfo = {

@@ -139,6 +139,42 @@ prune_versions() {
 
 # --- configuration ---
 
+provider_env_var() {
+  case "$1" in
+    openrouter) echo "OPENROUTER_API_KEY" ;;
+    groq)       echo "GROQ_API_KEY" ;;
+    google)     echo "GEMINI_API_KEY" ;;
+    openai)     echo "OPENAI_API_KEY" ;;
+    anthropic)  echo "ANTHROPIC_API_KEY" ;;
+    cerebras)   echo "CEREBRAS_API_KEY" ;;
+    *)          echo "PI_AGENT_API_KEY" ;;
+  esac
+}
+
+provider_default_model() {
+  case "$1" in
+    openrouter) echo "openrouter/auto" ;;
+    groq)       echo "llama-3.3-70b-versatile" ;;
+    google)     echo "gemini-2.5-flash" ;;
+    openai)     echo "gpt-4o-mini" ;;
+    anthropic)  echo "claude-sonnet-4-20250514" ;;
+    cerebras)   echo "llama-3.3-70b" ;;
+    *)          echo "openrouter/auto" ;;
+  esac
+}
+
+provider_prompt_label() {
+  case "$1" in
+    openrouter) echo "OpenRouter API key" ;;
+    groq)       echo "Groq API key" ;;
+    google)     echo "Google Gemini API key" ;;
+    openai)     echo "OpenAI API key" ;;
+    anthropic)  echo "Anthropic API key" ;;
+    cerebras)   echo "Cerebras API key" ;;
+    *)          echo "LLM provider API key" ;;
+  esac
+}
+
 setup_config() {
   mkdir -p "$CONFIG_DIR"
 
@@ -153,18 +189,37 @@ setup_config() {
     info "Using TELEGRAM_BOT_TOKEN from environment"
   fi
 
-  local api_key="${PI_AGENT_API_KEY:-}"
-  if [ -z "$api_key" ]; then
-    api_key=$(prompt_value "PI_AGENT_API_KEY" "OpenAI API key for pi-agent (required)")
-  else
+  # provider selection
+  echo ""
+  info "Supported LLM providers: openrouter, groq, google, openai, anthropic, cerebras"
+  local provider
+  printf 'LLM provider [openrouter]: ' >&2
+  read -r provider < /dev/tty
+  provider="${provider:-openrouter}"
+
+  local env_var_name
+  env_var_name=$(provider_env_var "$provider")
+  local default_model
+  default_model=$(provider_default_model "$provider")
+  local prompt_label
+  prompt_label=$(provider_prompt_label "$provider")
+
+  # resolve API key: check provider-specific env var, then PI_AGENT_API_KEY, then prompt
+  local api_key="${!env_var_name:-}"
+  if [ -n "$api_key" ]; then
+    info "Using ${env_var_name} from environment"
+  elif [ -n "${PI_AGENT_API_KEY:-}" ]; then
+    api_key="${PI_AGENT_API_KEY}"
     info "Using PI_AGENT_API_KEY from environment"
+  else
+    api_key=$(prompt_value "$env_var_name" "${prompt_label} (required)")
   fi
 
   # write secrets
   cat > "$SECRETS_FILE" << EOF
 # delegate-assistant secrets -- do not commit
 TELEGRAM_BOT_TOKEN=${bot_token}
-PI_AGENT_API_KEY=${api_key}
+${env_var_name}=${api_key}
 EOF
   chmod 600 "$SECRETS_FILE"
   ok "Wrote secrets to ${SECRETS_FILE}"
@@ -176,8 +231,8 @@ EOF
   "sqlitePath": "~/.local/share/delegate-assistant/data/assistant.db",
   "telegramPollIntervalMs": 2000,
   "modelProvider": "pi_agent",
-  "piAgentProvider": "openai",
-  "piAgentModel": "gpt-4o-mini",
+  "piAgentProvider": "${provider}",
+  "piAgentModel": "${default_model}",
   "piAgentMaxSteps": 15,
   "maxConcurrentTopics": 3,
   "assistantRepoPath": "${HOME}/dev",
