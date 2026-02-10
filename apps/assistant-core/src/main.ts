@@ -320,6 +320,8 @@ const runWorkerProcess = async (): Promise<number> => {
           defaultWorkspacePath: config.assistantRepoPath,
           stopSignal: stopController.signal,
           buildInfo,
+          startupAnnounceChatId: config.startupAnnounceChatId,
+          startupAnnounceThreadId: config.startupAnnounceThreadId,
           onRestartRequested: async () => {
             requestStop("chat_restart", true);
           },
