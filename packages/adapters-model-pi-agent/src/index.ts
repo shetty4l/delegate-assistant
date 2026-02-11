@@ -57,6 +57,14 @@ export class PiAgentModelAdapter implements ModelPort {
     });
     const tools = createWorkspaceTools(this.config.workspacePath, {
       enableShellTool: this.config.enableShellTool,
+      enableWebFetchTool: this.config.enableWebFetchTool,
+      enableWebSearchTool: this.config.enableWebSearchTool,
+      webFetchConfig: {
+        provider: this.config.webFetchProvider ?? this.config.provider,
+        model: this.config.webFetchModel ?? this.config.model,
+        getApiKey: () => this.config.apiKey,
+        sessionKey,
+      },
     });
 
     const agent = new Agent({
@@ -85,6 +93,14 @@ export class PiAgentModelAdapter implements ModelPort {
       if (cached && cached.workspacePath !== input.workspacePath) {
         const tools = createWorkspaceTools(input.workspacePath, {
           enableShellTool: this.config.enableShellTool,
+          enableWebFetchTool: this.config.enableWebFetchTool,
+          enableWebSearchTool: this.config.enableWebSearchTool,
+          webFetchConfig: {
+            provider: this.config.webFetchProvider ?? this.config.provider,
+            model: this.config.webFetchModel ?? this.config.model,
+            getApiKey: () => this.config.apiKey,
+            sessionKey,
+          },
         });
         agent.setTools(tools);
         const systemPrompt = loadSystemPrompt({

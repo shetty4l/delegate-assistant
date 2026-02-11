@@ -237,6 +237,10 @@ const runWorkerProcess = async (): Promise<number> => {
             systemPromptPath: config.systemPromptPath ?? undefined,
             gitIdentity: process.env.GIT_AUTHOR_NAME,
             enableShellTool: config.piAgentEnableShellTool,
+            enableWebFetchTool: config.piAgentEnableWebFetchTool,
+            enableWebSearchTool: config.piAgentEnableWebSearchTool,
+            webFetchProvider: config.piAgentWebFetchProvider ?? undefined,
+            webFetchModel: config.piAgentWebFetchModel ?? undefined,
           })
         : new DeterministicModelStub();
 
