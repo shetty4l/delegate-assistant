@@ -1,0 +1,159 @@
+---
+import { decodeSessionKeyId } from "@delegate/adapters-session-store-sqlite";
+import AppLayout from "../../../../layouts/AppLayout.astro";
+import { formatRelativeAge } from "../../../../lib/sessions";
+import { getSessionStore } from "../../../../lib/store";
+
+const sessionId = Astro.params.id ?? "";
+const store = await getSessionStore();
+const sessionKey = decodeSessionKeyId(sessionId);
+
+if (!sessionKey) {
+  return Astro.redirect("/sessions");
+}
+
+const session = await store.getSessionById(sessionId);
+if (!session) {
+  return Astro.redirect("/sessions");
+}
+
+const turns = await store.listTurns(sessionKey);
+
+const formatDuration = (start: string, end: string): string => {
+  const ms = Date.parse(end) - Date.parse(start);
+  if (Number.isNaN(ms) || ms < 0) return "—";
+  if (ms < 1000) return `${ms}ms`;
+  const sec = ms / 1000;
+  if (sec < 60) return `${sec.toFixed(1)}s`;
+  const min = Math.floor(sec / 60);
+  const remSec = Math.floor(sec % 60);
+  return `${min}m ${remSec}s`;
+};
+
+const formatCost = (cost: number | null): string => {
+  if (cost === null || cost === undefined) return "—";
+  if (cost < 0.01) return `$${cost.toFixed(4)}`;
+  return `$${cost.toFixed(2)}`;
+};
+
+const truncate = (text: string | null, max: number): string => {
+  if (!text) return "—";
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+};
+
+const statusLabel = (eventType: string): string => {
+  if (eventType === "turn_completed") return "completed";
+  if (eventType === "turn_failed") return "failed";
+  return "in progress";
+};
+
+const statusClass = (eventType: string): string => {
+  if (eventType === "turn_completed") return "status-ok";
+  if (eventType === "turn_failed") return "status-err";
+  return "status-pending";
+};
+---
+
+<AppLayout title="Turns">
+  <style>
+    .back { margin-bottom: 12px; }
+
+    .summary {
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 16px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    th {
+      text-align: left;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      padding: 8px 10px;
+      border-bottom: 2px solid var(--line);
+      font-weight: 700;
+    }
+
+    td {
+      padding: 10px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+    }
+
+    tr:hover {
+      background: var(--panel-muted);
+    }
+
+    .input-preview {
+      font-family: "SF Mono", Menlo, monospace;
+      font-size: 12px;
+      max-width: 300px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .status-ok { color: var(--accent); font-weight: 600; }
+    .status-err { color: var(--warn); font-weight: 600; }
+    .status-pending { color: var(--muted); font-weight: 600; }
+
+    .mono {
+      font-family: "SF Mono", Menlo, monospace;
+      font-size: 12px;
+    }
+
+    .empty {
+      text-align: center;
+      padding: 40px;
+      color: var(--muted);
+    }
+  </style>
+
+  <p class="back"><a href={`/sessions/${sessionId}`}>Back to session</a></p>
+
+  <div class="summary">
+    {turns.length} turn{turns.length !== 1 ? "s" : ""} for {session.topicKey}
+  </div>
+
+  {turns.length === 0 ? (
+    <div class="empty">No turns recorded yet for this session.</div>
+  ) : (
+    <table>
+      <thead>
+        <tr>
+          <th>Input</th>
+          <th>Status</th>
+          <th>Duration</th>
+          <th>Steps</th>
+          <th>Cost</th>
+          <th>Time</th>
+        </tr>
+      </thead>
+      <tbody>
+        {turns.map((turn) => (
+          <tr>
+            <td class="input-preview">
+              <a href={`/sessions/${sessionId}/turns/${turn.turnId}`}>
+                {truncate(turn.inputPreview, 60)}
+              </a>
+            </td>
+            <td class={statusClass(turn.lastEventType)}>
+              {statusLabel(turn.lastEventType)}
+            </td>
+            <td class="mono">{formatDuration(turn.startedAt, turn.endedAt)}</td>
+            <td class="mono">{turn.eventCount}</td>
+            <td class="mono">{formatCost(turn.totalCost)}</td>
+            <td>{formatRelativeAge(turn.startedAt)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )}
+</AppLayout>

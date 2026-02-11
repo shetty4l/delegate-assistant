@@ -5,6 +5,9 @@
   "scripts": {
     "test": "bun test tests/"
   },
+  "dependencies": {
+    "@delegate/domain": "workspace:*"
+  },
   "exports": {
     ".": "./src/index.ts"
   }

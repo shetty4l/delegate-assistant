@@ -2,6 +2,7 @@ import type {
   InboundMessage,
   ModelTurnResponse,
   OutboundMessage,
+  TurnEvent,
 } from "@delegate/domain";
 
 export type ChatUpdate = {
@@ -27,4 +28,8 @@ export type RespondInput = {
 export interface ModelPort {
   respond(input: RespondInput): Promise<ModelTurnResponse>;
   ping?(): Promise<void>;
+}
+
+export interface TurnEventSink {
+  emit(event: TurnEvent): Promise<void>;
 }

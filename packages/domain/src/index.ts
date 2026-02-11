@@ -23,3 +23,19 @@ export type ModelTurnResponse = {
     cost: number;
   };
 };
+
+export type TurnEventType =
+  | "turn_started"
+  | "tool_call"
+  | "tool_result"
+  | "step_complete"
+  | "turn_completed"
+  | "turn_failed";
+
+export type TurnEvent = {
+  turnId: string;
+  sessionKey: string;
+  eventType: TurnEventType;
+  timestamp: string;
+  data: Record<string, unknown>;
+};

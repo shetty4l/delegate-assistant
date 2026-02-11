@@ -2,7 +2,8 @@ import { describe, expect, mock, test } from "bun:test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { RespondInput } from "@delegate/ports";
+import type { TurnEvent } from "@delegate/domain";
+import type { RespondInput, TurnEventSink } from "@delegate/ports";
 import { Agent } from "@mariozechner/pi-agent-core";
 import { PiAgentModelAdapter } from "../src/index";
 
@@ -164,6 +165,197 @@ describe("PiAgentModelAdapter", () => {
         expect(result.confidence).toBe(1);
       } finally {
         Agent.prototype.prompt = originalPrompt;
+      }
+    });
+  });
+
+  describe("turn event emission", () => {
+    const buildCapturingSink = (): {
+      sink: TurnEventSink;
+      events: TurnEvent[];
+    } => {
+      const events: TurnEvent[] = [];
+      return {
+        sink: {
+          emit: async (event: TurnEvent) => {
+            events.push(event);
+          },
+        },
+        events,
+      };
+    };
+
+    test("emits turn_started and turn_completed on success", async () => {
+      const originalPrompt = Agent.prototype.prompt;
+      Agent.prototype.prompt = mock(async function (this: Agent) {
+        (this.state as any).messages = [
+          { role: "assistant", content: [{ type: "text", text: "hi" }] },
+        ];
+      }) as any;
+
+      try {
+        const { sink, events } = buildCapturingSink();
+        const adapter = makeAdapter({ turnEventSink: sink });
+        await adapter.respond(makeInput({ text: "hello world" }));
+
+        // Wait a tick for fire-and-forget promises to resolve
+        await new Promise((r) => setTimeout(r, 10));
+
+        const started = events.find((e) => e.eventType === "turn_started");
+        expect(started).toBeDefined();
+        expect(started!.data.inputText).toBe("hello world");
+        expect(started!.turnId).toBeDefined();
+
+        const completed = events.find((e) => e.eventType === "turn_completed");
+        expect(completed).toBeDefined();
+        expect(completed!.data.replyText).toBe("hi");
+        expect(completed!.turnId).toBe(started!.turnId);
+      } finally {
+        Agent.prototype.prompt = originalPrompt;
+      }
+    });
+
+    test("emits turn_failed on error", async () => {
+      const originalPrompt = Agent.prototype.prompt;
+      Agent.prototype.prompt = mock(() => {
+        throw new Error("model crash");
+      }) as any;
+
+      try {
+        const { sink, events } = buildCapturingSink();
+        const adapter = makeAdapter({ turnEventSink: sink });
+
+        await expect(adapter.respond(makeInput())).rejects.toThrow(
+          /Pi Agent error/,
+        );
+
+        await new Promise((r) => setTimeout(r, 10));
+
+        const started = events.find((e) => e.eventType === "turn_started");
+        expect(started).toBeDefined();
+
+        const failed = events.find((e) => e.eventType === "turn_failed");
+        expect(failed).toBeDefined();
+        expect(failed!.data.error).toContain("model crash");
+      } finally {
+        Agent.prototype.prompt = originalPrompt;
+      }
+    });
+
+    test("does not break when no sink is provided", async () => {
+      const originalPrompt = Agent.prototype.prompt;
+      Agent.prototype.prompt = mock(async function (this: Agent) {
+        (this.state as any).messages = [
+          { role: "assistant", content: [{ type: "text", text: "ok" }] },
+        ];
+      }) as any;
+
+      try {
+        const adapter = makeAdapter(); // no turnEventSink
+        const result = await adapter.respond(makeInput());
+        expect(result.replyText).toBe("ok");
+      } finally {
+        Agent.prototype.prompt = originalPrompt;
+      }
+    });
+
+    test("swallows sink errors silently", async () => {
+      const originalPrompt = Agent.prototype.prompt;
+      Agent.prototype.prompt = mock(async function (this: Agent) {
+        (this.state as any).messages = [
+          { role: "assistant", content: [{ type: "text", text: "ok" }] },
+        ];
+      }) as any;
+
+      try {
+        const failingSink: TurnEventSink = {
+          emit: async () => {
+            throw new Error("disk full");
+          },
+        };
+        const adapter = makeAdapter({ turnEventSink: failingSink });
+        // Should not throw despite sink failures
+        const result = await adapter.respond(makeInput());
+        expect(result.replyText).toBe("ok");
+      } finally {
+        Agent.prototype.prompt = originalPrompt;
+      }
+    });
+
+    test("emits tool_call and tool_result when agent uses tools", async () => {
+      const originalPrompt = Agent.prototype.prompt;
+      const originalSubscribe = Agent.prototype.subscribe;
+
+      // Capture the subscriber so we can fire events
+      let subscriber: ((event: any) => void) | null = null;
+      Agent.prototype.subscribe = mock(function (
+        this: Agent,
+        fn: (event: any) => void,
+      ) {
+        subscriber = fn;
+        return () => {
+          subscriber = null;
+        };
+      }) as any;
+
+      Agent.prototype.prompt = mock(async function (this: Agent) {
+        // Simulate tool execution events
+        if (subscriber) {
+          subscriber({
+            type: "tool_execution_start",
+            toolCallId: "tc-1",
+            toolName: "execute_shell",
+            args: { command: "ls" },
+          });
+          subscriber({
+            type: "tool_execution_end",
+            toolCallId: "tc-1",
+            toolName: "execute_shell",
+            result: "file1.ts\nfile2.ts",
+            isError: false,
+          });
+          subscriber({
+            type: "turn_end",
+            message: {
+              role: "assistant",
+              content: [{ type: "text", text: "done" }],
+              usage: { input: 100, output: 50, cost: { total: 0.01 } },
+            },
+            toolResults: [],
+          });
+        }
+        (this.state as any).messages = [
+          { role: "assistant", content: [{ type: "text", text: "done" }] },
+        ];
+      }) as any;
+
+      try {
+        const { sink, events } = buildCapturingSink();
+        const adapter = makeAdapter({ turnEventSink: sink });
+        await adapter.respond(makeInput());
+
+        await new Promise((r) => setTimeout(r, 10));
+
+        const toolCall = events.find((e) => e.eventType === "tool_call");
+        expect(toolCall).toBeDefined();
+        expect(toolCall!.data.toolName).toBe("execute_shell");
+        expect(toolCall!.data.args).toEqual({ command: "ls" });
+
+        const toolResult = events.find((e) => e.eventType === "tool_result");
+        expect(toolResult).toBeDefined();
+        expect(toolResult!.data.toolName).toBe("execute_shell");
+        expect(toolResult!.data.result).toBe("file1.ts\nfile2.ts");
+        expect(toolResult!.data.isError).toBe(false);
+
+        const stepComplete = events.find(
+          (e) => e.eventType === "step_complete",
+        );
+        expect(stepComplete).toBeDefined();
+        expect(stepComplete!.data.stepCount).toBe(1);
+        expect(stepComplete!.data.cost).toBe(0.01);
+      } finally {
+        Agent.prototype.prompt = originalPrompt;
+        Agent.prototype.subscribe = originalSubscribe;
       }
     });
   });
