@@ -31,6 +31,10 @@ export type AppConfig = {
   maxConcurrentTopics: number;
   systemPromptPath: string | null;
   piAgentEnableShellTool: boolean;
+  piAgentEnableWebFetchTool: boolean;
+  piAgentEnableWebSearchTool: boolean;
+  piAgentWebFetchProvider: string | null;
+  piAgentWebFetchModel: string | null;
   startupAnnounceChatId: string | null;
   startupAnnounceThreadId: string | null;
 };
@@ -62,6 +66,10 @@ type RawConfigFile = {
   maxConcurrentTopics?: number;
   systemPromptPath?: string | null;
   piAgentEnableShellTool?: boolean;
+  piAgentEnableWebFetchTool?: boolean;
+  piAgentEnableWebSearchTool?: boolean;
+  piAgentWebFetchProvider?: string | null;
+  piAgentWebFetchModel?: string | null;
   startupAnnounceChatId?: string | null;
   startupAnnounceThreadId?: string | null;
 };
@@ -188,6 +196,10 @@ export const loadConfig = (): AppConfig => {
     "MAX_CONCURRENT_TOPICS",
     "SYSTEM_PROMPT_PATH",
     "PI_AGENT_ENABLE_SHELL_TOOL",
+    "PI_AGENT_ENABLE_WEB_FETCH_TOOL",
+    "PI_AGENT_ENABLE_WEB_SEARCH_TOOL",
+    "PI_AGENT_WEB_FETCH_PROVIDER",
+    "PI_AGENT_WEB_FETCH_MODEL",
     "STARTUP_ANNOUNCE_CHAT_ID",
     "STARTUP_ANNOUNCE_THREAD_ID",
   ].filter((key) => process.env[key] !== undefined).length;
@@ -309,6 +321,22 @@ export const loadConfig = (): AppConfig => {
     process.env.PI_AGENT_ENABLE_SHELL_TOOL !== undefined
       ? process.env.PI_AGENT_ENABLE_SHELL_TOOL.trim() !== "false"
       : (asOptionalBoolean(fileConfig.piAgentEnableShellTool) ?? true);
+  const piAgentEnableWebFetchTool =
+    process.env.PI_AGENT_ENABLE_WEB_FETCH_TOOL !== undefined
+      ? process.env.PI_AGENT_ENABLE_WEB_FETCH_TOOL.trim() !== "false"
+      : (asOptionalBoolean(fileConfig.piAgentEnableWebFetchTool) ?? true);
+  const piAgentEnableWebSearchTool =
+    process.env.PI_AGENT_ENABLE_WEB_SEARCH_TOOL !== undefined
+      ? process.env.PI_AGENT_ENABLE_WEB_SEARCH_TOOL.trim() !== "false"
+      : (asOptionalBoolean(fileConfig.piAgentEnableWebSearchTool) ?? true);
+  const piAgentWebFetchProvider =
+    process.env.PI_AGENT_WEB_FETCH_PROVIDER?.trim() ||
+    asOptionalNullableString(fileConfig.piAgentWebFetchProvider) ||
+    null;
+  const piAgentWebFetchModel =
+    process.env.PI_AGENT_WEB_FETCH_MODEL?.trim() ||
+    asOptionalNullableString(fileConfig.piAgentWebFetchModel) ||
+    null;
   const startupAnnounceChatId =
     process.env.STARTUP_ANNOUNCE_CHAT_ID?.trim() ||
     asOptionalNullableString(fileConfig.startupAnnounceChatId) ||
@@ -398,6 +426,10 @@ export const loadConfig = (): AppConfig => {
     maxConcurrentTopics,
     systemPromptPath,
     piAgentEnableShellTool,
+    piAgentEnableWebFetchTool,
+    piAgentEnableWebSearchTool,
+    piAgentWebFetchProvider,
+    piAgentWebFetchModel,
     startupAnnounceChatId,
     startupAnnounceThreadId,
   };
