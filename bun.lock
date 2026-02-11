@@ -54,6 +54,9 @@
     },
     "packages/adapters-session-store-sqlite": {
       "name": "@delegate/adapters-session-store-sqlite",
+      "dependencies": {
+        "@delegate/domain": "workspace:*",
+      },
     },
     "packages/adapters-telegram": {
       "name": "@delegate/adapters-telegram",

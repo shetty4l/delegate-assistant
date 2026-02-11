@@ -15,6 +15,8 @@ export type { PiAgentAdapterConfig } from "./types";
 const DEFAULT_AGENT_IDLE_TIMEOUT_MS = 45 * 60 * 1000; // 45 minutes
 const EVICTION_SIZE_THRESHOLD = 50;
 
+const nowIso = (): string => new Date().toISOString();
+
 type CachedAgent = { agent: Agent; lastUsedAt: number; workspacePath: string };
 
 export class PiAgentModelAdapter implements ModelPort {
@@ -119,7 +121,49 @@ export class PiAgentModelAdapter implements ModelPort {
     let hasUsage = false;
     let stepCount = 0;
 
+    const sink = this.config.turnEventSink;
+    const turnId = crypto.randomUUID();
+
+    const emitEvent = (
+      eventType: import("@delegate/domain").TurnEventType,
+      data: Record<string, unknown>,
+    ): void => {
+      if (!sink) {
+        return;
+      }
+      sink
+        .emit({
+          turnId,
+          sessionKey,
+          eventType,
+          timestamp: nowIso(),
+          data,
+        })
+        .catch(() => {
+          // fire-and-forget: swallow errors
+        });
+    };
+
+    emitEvent("turn_started", { inputText: input.text });
+
     const unsubscribe = agent.subscribe((event: AgentEvent) => {
+      if (event.type === "tool_execution_start") {
+        emitEvent("tool_call", {
+          toolCallId: event.toolCallId,
+          toolName: event.toolName,
+          args: event.args,
+        });
+      }
+
+      if (event.type === "tool_execution_end") {
+        emitEvent("tool_result", {
+          toolCallId: event.toolCallId,
+          toolName: event.toolName,
+          result: event.result,
+          isError: event.isError,
+        });
+      }
+
       if (event.type === "turn_end") {
         stepCount += 1;
         const msg = event.message as AssistantMessage;
@@ -129,6 +173,13 @@ export class PiAgentModelAdapter implements ModelPort {
           totalOutputTokens += msg.usage.output;
           totalCost += msg.usage.cost.total;
         }
+
+        emitEvent("step_complete", {
+          stepCount,
+          inputTokens: msg.usage?.input ?? 0,
+          outputTokens: msg.usage?.output ?? 0,
+          cost: msg.usage?.cost.total ?? 0,
+        });
 
         // Enforce max steps
         if (stepCount >= this.config.maxSteps) {
@@ -141,6 +192,13 @@ export class PiAgentModelAdapter implements ModelPort {
       await agent.prompt(input.text);
     } catch (err) {
       unsubscribe();
+      emitEvent("turn_failed", {
+        error: String(err),
+        totalInputTokens,
+        totalOutputTokens,
+        totalCost,
+        stepCount,
+      });
       throw new Error(`Pi Agent error: ${String(err)}`, { cause: err });
     }
 
@@ -160,6 +218,14 @@ export class PiAgentModelAdapter implements ModelPort {
         .filter((c): c is { type: "text"; text: string } => c.type === "text")
         .map((c) => c.text)
         .join("\n") || "(no response)";
+
+    emitEvent("turn_completed", {
+      replyText,
+      totalInputTokens,
+      totalOutputTokens,
+      totalCost,
+      stepCount,
+    });
 
     const result: ModelTurnResponse = {
       mode: "chat_reply",

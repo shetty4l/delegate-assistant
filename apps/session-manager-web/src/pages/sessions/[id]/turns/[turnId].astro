@@ -1,0 +1,149 @@
+---
+import AppLayout from "../../../../layouts/AppLayout.astro";
+import { getSessionStore } from "../../../../lib/store";
+
+const sessionId = Astro.params.id ?? "";
+const turnId = Astro.params.turnId ?? "";
+const store = await getSessionStore();
+const events = await store.getTurnEvents(turnId);
+
+if (events.length === 0) {
+  return Astro.redirect(`/sessions/${sessionId}/turns`);
+}
+
+const eventIcon = (eventType: string): string => {
+  switch (eventType) {
+    case "turn_started":
+      return "▶";
+    case "tool_call":
+      return "🔧";
+    case "tool_result":
+      return "📄";
+    case "step_complete":
+      return "✓";
+    case "turn_completed":
+      return "✅";
+    case "turn_failed":
+      return "❌";
+    default:
+      return "•";
+  }
+};
+
+const eventLabel = (eventType: string): string => {
+  return eventType.replace(/_/g, " ");
+};
+
+const formatTime = (iso: string): string => {
+  try {
+    const d = new Date(iso);
+    return d.toLocaleTimeString("en-US", {
+      hour12: false,
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      fractionalSecondDigits: 3,
+    });
+  } catch {
+    return iso;
+  }
+};
+---
+
+<AppLayout title="Turn Detail">
+  <style>
+    .back { margin-bottom: 12px; }
+
+    .turn-header {
+      font-family: "SF Mono", Menlo, monospace;
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 16px;
+    }
+
+    .timeline {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
+
+    .event {
+      display: grid;
+      grid-template-columns: 80px 28px 1fr;
+      gap: 0 8px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .event:last-child {
+      border-bottom: none;
+    }
+
+    .event-time {
+      font-family: "SF Mono", Menlo, monospace;
+      font-size: 11px;
+      color: var(--muted);
+      padding-top: 2px;
+      text-align: right;
+    }
+
+    .event-icon {
+      text-align: center;
+      font-size: 14px;
+    }
+
+    .event-body {
+      min-width: 0;
+    }
+
+    .event-type {
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: capitalize;
+      margin-bottom: 6px;
+    }
+
+    .event-data {
+      background: var(--panel-muted);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px;
+      font-family: "SF Mono", Menlo, monospace;
+      font-size: 11px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+
+    details > summary {
+      cursor: pointer;
+      font-size: 12px;
+      color: var(--accent);
+      margin-bottom: 4px;
+    }
+  </style>
+
+  <p class="back"><a href={`/sessions/${sessionId}/turns`}>Back to turns</a></p>
+
+  <div class="turn-header">
+    Turn {turnId}
+    &middot; {events.length} event{events.length !== 1 ? "s" : ""}
+  </div>
+
+  <div class="timeline">
+    {events.map((event) => (
+      <div class="event">
+        <div class="event-time">{formatTime(event.timestamp)}</div>
+        <div class="event-icon">{eventIcon(event.eventType)}</div>
+        <div class="event-body">
+          <div class="event-type">{eventLabel(event.eventType)}</div>
+          <details>
+            <summary>Show data</summary>
+            <div class="event-data">{JSON.stringify(event.data, null, 2)}</div>
+          </details>
+        </div>
+      </div>
+    ))}
+  </div>
+</AppLayout>

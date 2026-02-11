@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
+import type { TurnEvent, TurnEventType } from "@delegate/domain";
 
 export type SessionMapping = {
   sessionKey: string;
@@ -177,6 +178,24 @@ export class SqliteSessionStore {
     db.exec(`
       CREATE INDEX IF NOT EXISTS workspace_history_topic_used_idx
       ON topic_workspace_history(topic_key, last_used_at);
+    `);
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS turn_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        turn_id TEXT NOT NULL,
+        session_key TEXT NOT NULL,
+        event_type TEXT NOT NULL,
+        timestamp TEXT NOT NULL,
+        data TEXT NOT NULL
+      );
+    `);
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS turn_events_session_ts_idx
+      ON turn_events(session_key, timestamp);
+    `);
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS turn_events_turn_id_idx
+      ON turn_events(turn_id);
     `);
     this.db = db;
   }
@@ -447,6 +466,134 @@ export class SqliteSessionStore {
       .all({ topic_key: topicKey }) as Array<{ workspace_path: string }>;
 
     return rows.map((row) => row.workspace_path);
+  }
+
+  async insertTurnEvent(event: TurnEvent): Promise<void> {
+    this.ensureDb()
+      .query(
+        `
+          INSERT INTO turn_events (turn_id, session_key, event_type, timestamp, data)
+          VALUES ($turn_id, $session_key, $event_type, $timestamp, $data)
+        `,
+      )
+      .run({
+        turn_id: event.turnId,
+        session_key: event.sessionKey,
+        event_type: event.eventType,
+        timestamp: event.timestamp,
+        data: JSON.stringify(event.data),
+      });
+  }
+
+  async getTurnEvents(turnId: string): Promise<TurnEvent[]> {
+    const rows = this.ensureDb()
+      .query(
+        `
+          SELECT turn_id, session_key, event_type, timestamp, data
+          FROM turn_events
+          WHERE turn_id = $turn_id
+          ORDER BY id ASC
+        `,
+      )
+      .all({ turn_id: turnId }) as Array<{
+      turn_id: string;
+      session_key: string;
+      event_type: string;
+      timestamp: string;
+      data: string;
+    }>;
+
+    return rows.map((row) => ({
+      turnId: row.turn_id,
+      sessionKey: row.session_key,
+      eventType: row.event_type as TurnEventType,
+      timestamp: row.timestamp,
+      data: JSON.parse(row.data) as Record<string, unknown>,
+    }));
+  }
+
+  async listTurns(sessionKey: string): Promise<
+    Array<{
+      turnId: string;
+      sessionKey: string;
+      firstEventType: TurnEventType;
+      lastEventType: TurnEventType;
+      startedAt: string;
+      endedAt: string;
+      eventCount: number;
+      inputPreview: string | null;
+      totalCost: number | null;
+    }>
+  > {
+    const rows = this.ensureDb()
+      .query(
+        `
+          SELECT
+            turn_id,
+            session_key,
+            MIN(timestamp) as started_at,
+            MAX(timestamp) as ended_at,
+            COUNT(*) as event_count,
+            MIN(CASE WHEN id = (SELECT MIN(id) FROM turn_events t2 WHERE t2.turn_id = turn_events.turn_id) THEN event_type END) as first_event_type,
+            MAX(CASE WHEN id = (SELECT MAX(id) FROM turn_events t2 WHERE t2.turn_id = turn_events.turn_id) THEN event_type END) as last_event_type,
+            MIN(CASE WHEN event_type = 'turn_started' THEN json_extract(data, '$.inputText') END) as input_preview,
+            MAX(CASE WHEN event_type IN ('turn_completed', 'turn_failed') THEN json_extract(data, '$.totalCost') END) as total_cost
+          FROM turn_events
+          WHERE session_key = $session_key
+          GROUP BY turn_id
+          ORDER BY started_at DESC
+        `,
+      )
+      .all({ session_key: sessionKey }) as Array<{
+      turn_id: string;
+      session_key: string;
+      started_at: string;
+      ended_at: string;
+      event_count: number;
+      first_event_type: string;
+      last_event_type: string;
+      input_preview: string | null;
+      total_cost: number | null;
+    }>;
+
+    return rows.map((row) => ({
+      turnId: row.turn_id,
+      sessionKey: row.session_key,
+      firstEventType: row.first_event_type as TurnEventType,
+      lastEventType: row.last_event_type as TurnEventType,
+      startedAt: row.started_at,
+      endedAt: row.ended_at,
+      eventCount: row.event_count,
+      inputPreview: row.input_preview,
+      totalCost: row.total_cost,
+    }));
+  }
+
+  async listTurnEvents(sessionKey: string): Promise<TurnEvent[]> {
+    const rows = this.ensureDb()
+      .query(
+        `
+          SELECT turn_id, session_key, event_type, timestamp, data
+          FROM turn_events
+          WHERE session_key = $session_key
+          ORDER BY id ASC
+        `,
+      )
+      .all({ session_key: sessionKey }) as Array<{
+      turn_id: string;
+      session_key: string;
+      event_type: string;
+      timestamp: string;
+      data: string;
+    }>;
+
+    return rows.map((row) => ({
+      turnId: row.turn_id,
+      sessionKey: row.session_key,
+      eventType: row.event_type as TurnEventType,
+      timestamp: row.timestamp,
+      data: JSON.parse(row.data) as Record<string, unknown>,
+    }));
   }
 
   async setCursor(cursor: number): Promise<void> {

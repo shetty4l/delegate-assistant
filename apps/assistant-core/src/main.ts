@@ -10,6 +10,8 @@ import { startTelegramWorker } from "@assistant-core/src/worker";
 import { PiAgentModelAdapter } from "@delegate/adapters-model-pi-agent";
 import { DeterministicModelStub } from "@delegate/adapters-model-stub";
 import { TelegramLongPollingAdapter } from "@delegate/adapters-telegram";
+import type { TurnEvent } from "@delegate/domain";
+import type { TurnEventSink } from "@delegate/ports";
 
 const RESTART_EXIT_CODE = 75;
 const WORKER_ROLE = "worker";
@@ -213,6 +215,17 @@ const runWorkerProcess = async (): Promise<number> => {
   const config = loadConfig();
   const buildInfo = loadBuildInfo();
   const sessionStore = new SqliteSessionStore(config.sqlitePath);
+
+  const turnEventSink: TurnEventSink = {
+    emit: async (event: TurnEvent): Promise<void> => {
+      try {
+        await sessionStore.insertTurnEvent(event);
+      } catch {
+        // fire-and-forget: swallow persistence errors
+      }
+    },
+  };
+
   const modelPort =
     config.modelProvider === "pi_agent"
       ? new PiAgentModelAdapter({
@@ -228,6 +241,7 @@ const runWorkerProcess = async (): Promise<number> => {
           enableWebSearchTool: config.piAgentEnableWebSearchTool,
           webFetchProvider: config.piAgentWebFetchProvider ?? undefined,
           webFetchModel: config.piAgentWebFetchModel ?? undefined,
+          turnEventSink,
         })
       : new DeterministicModelStub();
 

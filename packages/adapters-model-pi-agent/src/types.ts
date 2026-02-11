@@ -1,3 +1,5 @@
+import type { TurnEventSink } from "@delegate/ports";
+
 export type PiAgentAdapterConfig = {
   provider: string;
   model: string;
@@ -19,4 +21,6 @@ export type PiAgentAdapterConfig = {
   webFetchModel?: string;
   /** Evict cached agents after this many ms of inactivity (default: 45 min). */
   agentIdleTimeoutMs?: number;
+  /** Optional sink for emitting turn observability events. */
+  turnEventSink?: TurnEventSink;
 };

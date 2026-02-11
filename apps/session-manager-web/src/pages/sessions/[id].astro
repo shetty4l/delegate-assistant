@@ -10,6 +10,15 @@ const item = await store.getSessionById(sessionId);
 if (!item) {
   return Astro.redirect("/sessions");
 }
+
+const turns = await store.listTurns(item.sessionKey);
+const turnCount = turns.length;
+const totalCost = turns.reduce((sum, t) => sum + (t.totalCost ?? 0), 0);
+const formatCost = (cost: number): string => {
+  if (cost <= 0) return "—";
+  if (cost < 0.01) return `$${cost.toFixed(4)}`;
+  return `$${cost.toFixed(2)}`;
+};
 ---
 
 <AppLayout title="Session Detail">
@@ -40,6 +49,12 @@ if (!item) {
       font-size: 13px;
       word-break: break-word;
     }
+
+    .turns-link {
+      display: inline-block;
+      margin-top: 6px;
+      font-size: 13px;
+    }
   </style>
 
   <p><a href="/sessions">Back to sessions</a></p>
@@ -67,6 +82,16 @@ if (!item) {
     <div class="row">
       <div class="label">Session Key</div>
       <div class="value">{item.sessionKey}</div>
+    </div>
+    <div class="row">
+      <div class="label">Turns</div>
+      <div>
+        {turnCount} turn{turnCount !== 1 ? "s" : ""}
+        {totalCost > 0 ? ` · ${formatCost(totalCost)} total` : ""}
+      </div>
+      <a class="turns-link" href={`/sessions/${sessionId}/turns`}>
+        View turns →
+      </a>
     </div>
   </div>
 </AppLayout>
