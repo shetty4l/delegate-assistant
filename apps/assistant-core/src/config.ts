@@ -2,6 +2,25 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+export type TieredRouterAppConfig = {
+  classifier: {
+    ollamaUrl: string;
+    model: string;
+    numCtx: number;
+    confidenceThreshold: number;
+  };
+  t1: {
+    ollamaUrl: string;
+    model: string;
+    numCtx: number;
+  };
+  engram: {
+    url: string;
+    maxMemories: number;
+    minStrength: number;
+  };
+};
+
 export type AppConfig = {
   configSourcePath: string;
   envOverridesApplied: number;
@@ -9,7 +28,7 @@ export type AppConfig = {
   sqlitePath: string;
   telegramBotToken: string | null;
   telegramPollIntervalMs: number;
-  modelProvider: "stub" | "pi_agent";
+  modelProvider: "stub" | "pi_agent" | "tiered_router";
   modelName: string;
   assistantRepoPath: string;
   sessionIdleTimeoutMs: number;
@@ -32,6 +51,26 @@ export type AppConfig = {
   piAgentWebFetchModel: string | null;
   startupAnnounceChatId: string | null;
   startupAnnounceThreadId: string | null;
+  tieredRouter: TieredRouterAppConfig | null;
+};
+
+type RawTieredRouterConfig = {
+  classifier?: {
+    ollamaUrl?: string;
+    model?: string;
+    numCtx?: number;
+    confidenceThreshold?: number;
+  };
+  t1?: {
+    ollamaUrl?: string;
+    model?: string;
+    numCtx?: number;
+  };
+  engram?: {
+    url?: string;
+    maxMemories?: number;
+    minStrength?: number;
+  };
 };
 
 type RawConfigFile = {
@@ -39,7 +78,7 @@ type RawConfigFile = {
   sqlitePath?: string;
   telegramBotToken?: string | null;
   telegramPollIntervalMs?: number;
-  modelProvider?: "stub" | "pi_agent";
+  modelProvider?: "stub" | "pi_agent" | "tiered_router";
   modelName?: string;
   assistantRepoPath?: string;
   sessionIdleTimeoutMs?: number;
@@ -62,6 +101,7 @@ type RawConfigFile = {
   piAgentWebFetchModel?: string | null;
   startupAnnounceChatId?: string | null;
   startupAnnounceThreadId?: string | null;
+  tieredRouter?: RawTieredRouterConfig;
 };
 
 const defaultConfigPath = "~/.config/delegate-assistant/config.json";
@@ -135,12 +175,14 @@ const asOptionalNumber = (value: unknown): number | undefined => {
   return undefined;
 };
 
-const asModelProvider = (value: unknown): "stub" | "pi_agent" => {
-  if (value === "stub" || value === "pi_agent") {
+const asModelProvider = (
+  value: unknown,
+): "stub" | "pi_agent" | "tiered_router" => {
+  if (value === "stub" || value === "pi_agent" || value === "tiered_router") {
     return value;
   }
   throw new Error(
-    `Model provider must be one of: stub, pi_agent (received "${String(value)}")`,
+    `Model provider must be one of: stub, pi_agent, tiered_router (received "${String(value)}")`,
   );
 };
 
@@ -321,7 +363,70 @@ export const loadConfig = (): AppConfig => {
   asPositiveInt(progressEveryMs, "progressEveryMs");
   asPositiveInt(progressMaxCount, "progressMaxCount");
 
-  if (modelProvider === "pi_agent" && !piAgentApiKey) {
+  // --- Tiered router config (only parsed when modelProvider is "tiered_router") ---
+  const raw = fileConfig.tieredRouter;
+  const tieredRouter: TieredRouterAppConfig | null =
+    modelProvider === "tiered_router"
+      ? {
+          classifier: {
+            ollamaUrl:
+              process.env.TIERED_ROUTER_CLASSIFIER_OLLAMA_URL?.trim() ||
+              asOptionalString(raw?.classifier?.ollamaUrl) ||
+              "http://127.0.0.1:11434",
+            model:
+              process.env.TIERED_ROUTER_CLASSIFIER_MODEL?.trim() ||
+              asOptionalString(raw?.classifier?.model) ||
+              "qwen2.5:3b",
+            numCtx: Number(
+              process.env.TIERED_ROUTER_CLASSIFIER_NUM_CTX ??
+                asOptionalNumber(raw?.classifier?.numCtx) ??
+                "4096",
+            ),
+            confidenceThreshold: Number(
+              process.env.TIERED_ROUTER_CLASSIFIER_CONFIDENCE_THRESHOLD ??
+                asOptionalNumber(raw?.classifier?.confidenceThreshold) ??
+                "0.7",
+            ),
+          },
+          t1: {
+            ollamaUrl:
+              process.env.TIERED_ROUTER_T1_OLLAMA_URL?.trim() ||
+              asOptionalString(raw?.t1?.ollamaUrl) ||
+              "http://127.0.0.1:11434",
+            model:
+              process.env.TIERED_ROUTER_T1_MODEL?.trim() ||
+              asOptionalString(raw?.t1?.model) ||
+              "qwen2.5:14b-instruct-q4_K_M",
+            numCtx: Number(
+              process.env.TIERED_ROUTER_T1_NUM_CTX ??
+                asOptionalNumber(raw?.t1?.numCtx) ??
+                "16384",
+            ),
+          },
+          engram: {
+            url:
+              process.env.TIERED_ROUTER_ENGRAM_URL?.trim() ||
+              asOptionalString(raw?.engram?.url) ||
+              "http://127.0.0.1:7749",
+            maxMemories: Number(
+              process.env.TIERED_ROUTER_ENGRAM_MAX_MEMORIES ??
+                asOptionalNumber(raw?.engram?.maxMemories) ??
+                "3",
+            ),
+            minStrength: Number(
+              process.env.TIERED_ROUTER_ENGRAM_MIN_STRENGTH ??
+                asOptionalNumber(raw?.engram?.minStrength) ??
+                "0.3",
+            ),
+          },
+        }
+      : null;
+
+  // Tiered router also needs a T2 backend, which requires pi-agent API key
+  if (
+    (modelProvider === "pi_agent" || modelProvider === "tiered_router") &&
+    !piAgentApiKey
+  ) {
     const providerEnvVars: Record<string, string> = {
       openrouter: "OPENROUTER_API_KEY",
       groq: "GROQ_API_KEY",
@@ -337,7 +442,7 @@ export const loadConfig = (): AppConfig => {
         ? `Set piAgentApiKey (or ${expectedVar} env var)`
         : "Set piAgentApiKey";
       throw new Error(
-        `${hint} when model provider is "pi_agent" (provider: ${piAgentProvider}).`,
+        `${hint} when model provider is "${modelProvider}" (provider: ${piAgentProvider}).`,
       );
     }
   }
@@ -388,5 +493,6 @@ export const loadConfig = (): AppConfig => {
     piAgentWebFetchModel,
     startupAnnounceChatId,
     startupAnnounceThreadId,
+    tieredRouter,
   };
 };

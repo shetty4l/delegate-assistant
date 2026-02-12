@@ -35,12 +35,6 @@
         "typescript": "^5.9.3",
       },
     },
-    "benchmark": {
-      "name": "@delegate/benchmark",
-      "dependencies": {
-        "@mariozechner/pi-ai": "^0.52.9",
-      },
-    },
     "packages/adapters-model-pi-agent": {
       "name": "@delegate/adapters-model-pi-agent",
       "dependencies": {
@@ -53,6 +47,13 @@
     },
     "packages/adapters-model-stub": {
       "name": "@delegate/adapters-model-stub",
+      "dependencies": {
+        "@delegate/domain": "workspace:*",
+        "@delegate/ports": "workspace:*",
+      },
+    },
+    "packages/adapters-model-tiered-router": {
+      "name": "@delegate/adapters-model-tiered-router",
       "dependencies": {
         "@delegate/domain": "workspace:*",
         "@delegate/ports": "workspace:*",
@@ -206,13 +207,13 @@
 
     "@delegate/adapters-model-stub": ["@delegate/adapters-model-stub@workspace:packages/adapters-model-stub"],
 
+    "@delegate/adapters-model-tiered-router": ["@delegate/adapters-model-tiered-router@workspace:packages/adapters-model-tiered-router"],
+
     "@delegate/adapters-session-store-sqlite": ["@delegate/adapters-session-store-sqlite@workspace:packages/adapters-session-store-sqlite"],
 
     "@delegate/adapters-telegram": ["@delegate/adapters-telegram@workspace:packages/adapters-telegram"],
 
     "@delegate/assistant-core": ["@delegate/assistant-core@workspace:apps/assistant-core"],
-
-    "@delegate/benchmark": ["@delegate/benchmark@workspace:benchmark"],
 
     "@delegate/domain": ["@delegate/domain@workspace:packages/domain"],
 

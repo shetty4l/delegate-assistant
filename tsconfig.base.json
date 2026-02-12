@@ -23,6 +23,12 @@
       ],
       "@delegate/adapters-model-pi-agent/*": [
         "packages/adapters-model-pi-agent/src/*"
+      ],
+      "@delegate/adapters-model-tiered-router": [
+        "packages/adapters-model-tiered-router/src/index.ts"
+      ],
+      "@delegate/adapters-model-tiered-router/*": [
+        "packages/adapters-model-tiered-router/src/*"
       ]
     }
   }
