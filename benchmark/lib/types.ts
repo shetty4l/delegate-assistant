@@ -78,38 +78,3 @@ export interface BenchmarkRun {
   /** Results per prompt */
   results: PromptResult[];
 }
-
-// --- Review/rating types ---
-
-export type Rating = "A" | "B" | "C";
-
-export interface RatedVariant {
-  /** A = acceptable, B = borderline, C = unacceptable */
-  rating: Rating;
-  /** Optional reviewer notes */
-  notes?: string;
-}
-
-export interface RatedResult {
-  prompt_id: string;
-  category: PromptCategory;
-  ollama_bare: RatedVariant;
-  ollama_engram: RatedVariant | null;
-}
-
-export interface RatedBenchmarkRun {
-  /** Path to the source benchmark run file */
-  source: string;
-  /** ISO timestamp of the review */
-  reviewed_at: string;
-  ratings: RatedResult[];
-  summary: {
-    total: number;
-    ollama_bare: { A: number; B: number; C: number };
-    ollama_engram: { A: number; B: number; C: number } | null;
-    by_category: Record<
-      PromptCategory,
-      { A: number; B: number; C: number; total: number }
-    >;
-  };
-}
