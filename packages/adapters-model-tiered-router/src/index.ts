@@ -1,6 +1,7 @@
 import type { ModelTurnResponse } from "@delegate/domain";
 import type { ModelPort, RespondInput } from "@delegate/ports";
 import { classify } from "./classifier";
+import { engramRecall } from "./engram-client";
 import { ollamaChat, ollamaHealthCheck } from "./ollama-client";
 import { T1_SYSTEM_PROMPT } from "./system-prompt";
 import type {
@@ -72,17 +73,40 @@ export class TieredRouterAdapter implements ModelPort {
     const sessionKey =
       input.sessionId ?? `${input.chatId}:${input.threadId ?? "root"}`;
 
-    // Step 1: Check if classifier is available
+    // Step 1: Recall memories from Engram (fire-and-forget on failure)
+    const { engram } = this.config;
+    const memories = await engramRecall({
+      url: engram.url,
+      query: input.text,
+      maxMemories: engram.maxMemories,
+      minStrength: engram.minStrength,
+    });
+
+    if (memories.count > 0) {
+      log("tiered_router.engram.recalled", {
+        sessionKey,
+        count: memories.count,
+        fallbackMode: memories.fallbackMode,
+      });
+    }
+
+    const memoryContext = memories.formatted || undefined;
+
+    // Step 2: Check if classifier is available
     const classifierAvailable = await this.isClassifierHealthy();
 
     if (!classifierAvailable) {
       return this.handleT2(input, sessionKey, "classifier_unhealthy");
     }
 
-    // Step 2: Classify the request
+    // Step 3: Classify the request (with memory context for T0)
     let classification: ClassificationResult;
     try {
-      classification = await classify(this.config.classifier, input.text);
+      classification = await classify(
+        this.config.classifier,
+        input.text,
+        memoryContext,
+      );
 
       log("tiered_router.classify.complete", {
         sessionKey,
@@ -92,7 +116,6 @@ export class TieredRouterAdapter implements ModelPort {
         category: classification.category,
       });
     } catch (error) {
-      // Classification failed — mark unhealthy and fall back to T2
       this.classifierHealth = {
         healthy: false,
         lastCheckedAt: Date.now(),
@@ -108,7 +131,7 @@ export class TieredRouterAdapter implements ModelPort {
       return this.handleT2(input, sessionKey, "classifier_error");
     }
 
-    // Step 3: Route based on classification
+    // Step 4: Route based on classification
     if (classification.tier === "t2") {
       return this.handleT2(input, sessionKey, "classified_t2");
     }
@@ -125,7 +148,7 @@ export class TieredRouterAdapter implements ModelPort {
       return this.handleT2(input, sessionKey, "low_confidence");
     }
 
-    // Step 4: Classified as T1 — check T1 health and attempt local inference
+    // Step 5: Classified as T1 — check T1 health and attempt local inference
     const t1Available = await this.isT1Healthy();
 
     if (!t1Available) {
@@ -136,7 +159,12 @@ export class TieredRouterAdapter implements ModelPort {
     this.activeRequests.set(sessionKey, abortController);
 
     try {
-      return await this.handleT1(input, sessionKey, abortController.signal);
+      return await this.handleT1(
+        input,
+        sessionKey,
+        abortController.signal,
+        memoryContext,
+      );
     } catch (error) {
       if (abortController.signal.aborted) {
         throw error;
@@ -269,20 +297,26 @@ export class TieredRouterAdapter implements ModelPort {
     input: RespondInput,
     sessionKey: string,
     signal: AbortSignal,
+    memoryContext?: string,
   ): Promise<ModelTurnResponse> {
     const { ollamaUrl, model, numCtx } = this.config.t1;
+
+    const systemPrompt = memoryContext
+      ? `${T1_SYSTEM_PROMPT}\n\n${memoryContext}`
+      : T1_SYSTEM_PROMPT;
 
     log("tiered_router.t1.start", {
       sessionKey,
       model,
       promptChars: input.text.length,
+      hasMemories: !!memoryContext,
     });
 
     const result = await ollamaChat({
       url: ollamaUrl,
       model,
       messages: [
-        { role: "system", content: T1_SYSTEM_PROMPT },
+        { role: "system", content: systemPrompt },
         { role: "user", content: input.text },
       ],
       numCtx,
