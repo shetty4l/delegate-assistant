@@ -4,8 +4,7 @@
   "type": "module",
   "workspaces": [
     "apps/*",
-    "packages/*",
-    "benchmark"
+    "packages/*"
   ],
   "scripts": {
     "dev": "bun run --cwd apps/assistant-core dev",

@@ -9,6 +9,7 @@ import {
 import { startTelegramWorker } from "@assistant-core/src/worker";
 import { PiAgentModelAdapter } from "@delegate/adapters-model-pi-agent";
 import { DeterministicModelStub } from "@delegate/adapters-model-stub";
+import { TieredRouterAdapter } from "@delegate/adapters-model-tiered-router";
 import { TelegramLongPollingAdapter } from "@delegate/adapters-telegram";
 import type { TurnEvent } from "@delegate/domain";
 import type { TurnEventSink } from "@delegate/ports";
@@ -226,24 +227,46 @@ const runWorkerProcess = async (): Promise<number> => {
     },
   };
 
-  const modelPort =
-    config.modelProvider === "pi_agent"
-      ? new PiAgentModelAdapter({
-          provider: config.piAgentProvider,
-          model: config.piAgentModel,
-          apiKey: config.piAgentApiKey ?? undefined,
-          maxSteps: config.piAgentMaxSteps,
-          workspacePath: config.assistantRepoPath,
-          systemPromptPath: config.systemPromptPath ?? undefined,
-          gitIdentity: process.env.GIT_AUTHOR_NAME,
-          enableShellTool: config.piAgentEnableShellTool,
-          enableWebFetchTool: config.piAgentEnableWebFetchTool,
-          enableWebSearchTool: config.piAgentEnableWebSearchTool,
-          webFetchProvider: config.piAgentWebFetchProvider ?? undefined,
-          webFetchModel: config.piAgentWebFetchModel ?? undefined,
-          turnEventSink,
-        })
-      : new DeterministicModelStub();
+  const buildPiAgentAdapter = () =>
+    new PiAgentModelAdapter({
+      provider: config.piAgentProvider,
+      model: config.piAgentModel,
+      apiKey: config.piAgentApiKey ?? undefined,
+      maxSteps: config.piAgentMaxSteps,
+      workspacePath: config.assistantRepoPath,
+      systemPromptPath: config.systemPromptPath ?? undefined,
+      gitIdentity: process.env.GIT_AUTHOR_NAME,
+      enableShellTool: config.piAgentEnableShellTool,
+      enableWebFetchTool: config.piAgentEnableWebFetchTool,
+      enableWebSearchTool: config.piAgentEnableWebSearchTool,
+      webFetchProvider: config.piAgentWebFetchProvider ?? undefined,
+      webFetchModel: config.piAgentWebFetchModel ?? undefined,
+      turnEventSink,
+    });
+
+  const buildModelPort = () => {
+    if (config.modelProvider === "tiered_router") {
+      if (!config.tieredRouter) {
+        throw new Error(
+          'modelProvider is "tiered_router" but tieredRouter config block is missing.',
+        );
+      }
+      const t2Backend = buildPiAgentAdapter();
+      return new TieredRouterAdapter({
+        classifier: config.tieredRouter.classifier,
+        t1: config.tieredRouter.t1,
+        engram: config.tieredRouter.engram,
+        t2Backend,
+        turnEventSink,
+      });
+    }
+    if (config.modelProvider === "pi_agent") {
+      return buildPiAgentAdapter();
+    }
+    return new DeterministicModelStub();
+  };
+
+  const modelPort = buildModelPort();
 
   await sessionStore.init();
 
