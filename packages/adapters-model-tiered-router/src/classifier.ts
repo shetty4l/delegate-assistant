@@ -20,6 +20,12 @@ Respond with ONLY valid JSON, no other text:
 
 Categories: knowledge, drafting, planning, conversational, code_change, tool_needed, analysis`;
 
+const CLASSIFIER_CONTEXT_ADDENDUM = `
+
+The following project context was recalled from memory and will be available to T1 if you route there. Domain-specific questions that can be answered using this context should go to T1.
+
+`;
+
 /**
  * Extract a JSON object from a model response that may contain
  * markdown fences, leading/trailing text, or other noise.
@@ -87,19 +93,29 @@ function parseClassification(raw: string): ClassificationResult {
 /**
  * Classify a user prompt into a tier using the T0 model via Ollama.
  *
+ * When `memoryContext` is provided (formatted Engram recall output), it is
+ * appended to the classifier system prompt so the model knows project-specific
+ * context is available for T1.
+ *
  * Returns a ClassificationResult on success, or throws on failure
  * (network error, timeout, parse error).
  */
 export async function classify(
   config: ClassifierConfig,
   userText: string,
+  memoryContext?: string,
   signal?: AbortSignal,
 ): Promise<ClassificationResult> {
+  let systemPrompt = CLASSIFIER_SYSTEM_PROMPT;
+  if (memoryContext) {
+    systemPrompt += CLASSIFIER_CONTEXT_ADDENDUM + memoryContext;
+  }
+
   const result = await ollamaChat({
     url: config.ollamaUrl,
     model: config.model,
     messages: [
-      { role: "system", content: CLASSIFIER_SYSTEM_PROMPT },
+      { role: "system", content: systemPrompt },
       { role: "user", content: userText },
     ],
     numCtx: config.numCtx,
