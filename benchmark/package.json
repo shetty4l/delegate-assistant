@@ -1,0 +1,8 @@
+{
+  "name": "@delegate/benchmark",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@mariozechner/pi-ai": "^0.52.9"
+  }
+}

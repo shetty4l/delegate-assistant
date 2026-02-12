@@ -1,0 +1,126 @@
+[
+  {
+    "id": "knowledge-01",
+    "category": "knowledge",
+    "prompt": "Explain the difference between hexagonal architecture and layered architecture in 2-3 paragraphs.",
+    "notes": "Tests structured technical explanation. Both models should know this well."
+  },
+  {
+    "id": "knowledge-02",
+    "category": "knowledge",
+    "prompt": "What are the tradeoffs between SQLite WAL mode and journal mode?",
+    "notes": "Relevant to the project (uses SQLite WAL). Tests factual depth on a specific topic."
+  },
+  {
+    "id": "knowledge-03",
+    "category": "knowledge",
+    "prompt": "How does Telegram bot long polling work compared to webhooks? When would you choose one over the other?",
+    "notes": "Directly relevant to the assistant's architecture. Tests practical knowledge."
+  },
+  {
+    "id": "knowledge-04",
+    "category": "knowledge",
+    "prompt": "What is the ports and adapters pattern? Give a concrete example of how you'd structure a Node.js application using it.",
+    "notes": "Tests ability to explain with concrete examples, not just theory."
+  },
+  {
+    "id": "knowledge-05",
+    "category": "knowledge",
+    "prompt": "Explain TypeScript's `satisfies` operator and when you'd use it over type assertions with `as`.",
+    "notes": "Tests knowledge of a relatively recent TS feature (4.9+). Smaller models may struggle."
+  },
+  {
+    "id": "drafting-01",
+    "category": "drafting",
+    "prompt": "Draft a concise git commit message for the following change: added input validation to the config parser so it now rejects unknown keys, validates types for all fields, and provides clear error messages pointing to the invalid field.",
+    "notes": "Tests ability to follow commit message conventions and be concise."
+  },
+  {
+    "id": "drafting-02",
+    "category": "drafting",
+    "prompt": "Write a 2-3 sentence GitHub issue description for this feature request: the web dashboard should show which LLM model handled each session, including token counts and cost per session.",
+    "notes": "Tests concise feature description writing."
+  },
+  {
+    "id": "drafting-03",
+    "category": "drafting",
+    "prompt": "Summarize this in 3 bullet points: Prompt caching is a feature offered by LLM providers that avoids re-processing identical prompt prefixes across API requests. You mark content blocks with a cache control annotation, and on the first call the provider processes the full prompt and caches the prefix up to the breakpoint. On subsequent calls within 5 minutes, if the prefix is byte-identical, the provider reads from cache instead of re-processing. Cache reads cost 10% of normal input token price while cache writes cost 125% of the base price.",
+    "notes": "Tests summarization. Both models should handle this well."
+  },
+  {
+    "id": "drafting-04",
+    "category": "drafting",
+    "prompt": "Rewrite this to be more concise and professional: 'I would like to inform you that the implementation of the feature has been completed successfully and all of the various tests that we have written are currently passing without any issues or failures at this particular point in time.'",
+    "notes": "Tests editing/rewriting for conciseness."
+  },
+  {
+    "id": "planning-01",
+    "category": "planning",
+    "prompt": "I'm thinking about adding rate limiting to an HTTP API built with Bun. What are the main approaches and which would you recommend for a personal project with low traffic?",
+    "notes": "Tests practical advice with context-appropriate recommendations."
+  },
+  {
+    "id": "planning-02",
+    "category": "planning",
+    "prompt": "What should I consider when choosing between Bun and Node.js for a production TypeScript service that needs to run on macOS?",
+    "notes": "Directly relevant decision. Tests balanced pros/cons analysis."
+  },
+  {
+    "id": "planning-03",
+    "category": "planning",
+    "prompt": "I want to add a health check endpoint to my service that also reports the status of downstream dependencies like a database and an external API. What's a good design pattern for this?",
+    "notes": "Tests practical system design at an appropriate scale."
+  },
+  {
+    "id": "planning-04",
+    "category": "planning",
+    "prompt": "What are the pros and cons of monorepos vs polyrepos for a solo developer working on 3-4 related TypeScript packages?",
+    "notes": "Tests ability to give context-appropriate advice (solo dev, not enterprise)."
+  },
+  {
+    "id": "conversational-01",
+    "category": "conversational",
+    "prompt": "Thanks for explaining that. Can you give me a concrete example of when the second approach would be better than the first?",
+    "notes": "Tests handling of a follow-up without prior context. Should ask for clarification or handle gracefully."
+  },
+  {
+    "id": "conversational-02",
+    "category": "conversational",
+    "prompt": "That's a good point about the tradeoffs. But in my case I only have one user and the data is all local. Does that change your recommendation?",
+    "notes": "Tests ability to adjust advice given new constraints, even without full context."
+  },
+  {
+    "id": "conversational-03",
+    "category": "conversational",
+    "prompt": "I disagree with your suggestion to use a database for this. A simple JSON file would work fine. What am I missing?",
+    "notes": "Tests respectful pushback/engagement with a disagreement."
+  },
+  {
+    "id": "memory-01",
+    "category": "memory",
+    "prompt": "How does session management work in our project?",
+    "engram_query": "delegate-assistant session management architecture",
+    "notes": "Vague without context. Engram should provide project-specific session details."
+  },
+  {
+    "id": "memory-02",
+    "category": "memory",
+    "prompt": "Why did we choose pi-agent over calling the LLM APIs directly?",
+    "engram_query": "pi-agent decision rationale delegate-assistant",
+    "notes": "Tests recall of a specific architectural decision."
+  },
+  {
+    "id": "memory-03",
+    "category": "memory",
+    "prompt": "What's our current deployment setup and how does the auto-update process work?",
+    "engram_query": "delegate-assistant deployment mac-mini auto-update",
+    "notes": "Tests recall of operational/infrastructure details."
+  },
+  {
+    "id": "memory-04",
+    "category": "memory",
+    "prompt": "What model provider and model are we using in production right now, and why?",
+    "engram_query": "delegate-assistant model provider groq openrouter production",
+    "notes": "Tests recall of current configuration and the reasoning behind it."
+  }
+]

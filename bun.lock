@@ -35,6 +35,12 @@
         "typescript": "^5.9.3",
       },
     },
+    "benchmark": {
+      "name": "@delegate/benchmark",
+      "dependencies": {
+        "@mariozechner/pi-ai": "^0.52.9",
+      },
+    },
     "packages/adapters-model-pi-agent": {
       "name": "@delegate/adapters-model-pi-agent",
       "dependencies": {
@@ -205,6 +211,8 @@
     "@delegate/adapters-telegram": ["@delegate/adapters-telegram@workspace:packages/adapters-telegram"],
 
     "@delegate/assistant-core": ["@delegate/assistant-core@workspace:apps/assistant-core"],
+
+    "@delegate/benchmark": ["@delegate/benchmark@workspace:benchmark"],
 
     "@delegate/domain": ["@delegate/domain@workspace:packages/domain"],
 
