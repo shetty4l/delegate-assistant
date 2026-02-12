@@ -88,23 +88,24 @@ export const decodeSessionKeyId = (id: string): string | null => {
 };
 
 export const parseSessionKey = (sessionKey: string): SessionKeyParts | null => {
+  // Try JSON array format first (legacy/test format)
   try {
     const parsed = JSON.parse(sessionKey) as unknown;
-    if (!Array.isArray(parsed) || parsed.length !== 2) {
-      return null;
+    if (Array.isArray(parsed) && parsed.length === 2) {
+      const topicKey = parsed[0];
+      const workspacePath = parsed[1];
+      if (typeof topicKey === "string" && typeof workspacePath === "string") {
+        return { topicKey, workspacePath };
+      }
     }
-    const topicKey = parsed[0];
-    const workspacePath = parsed[1];
-    if (typeof topicKey !== "string" || typeof workspacePath !== "string") {
-      return null;
-    }
-    return {
-      topicKey,
-      workspacePath,
-    };
   } catch {
-    return null;
+    // Not JSON — treat as plain topicKey string
   }
+  // Plain string format: session_key IS the topicKey
+  if (sessionKey.length > 0) {
+    return { topicKey: sessionKey, workspacePath: "" };
+  }
+  return null;
 };
 
 const asSessionListItem = (row: {
@@ -242,14 +243,16 @@ export class SqliteSessionStore {
       .query(
         `
           SELECT
-            session_key,
-            session_id,
-            last_used_at,
-            status,
-            json_extract(session_key, '$[0]') as topic_key,
-            json_extract(session_key, '$[1]') as workspace_path
-          FROM session_mappings
-          WHERE session_key = $session_key
+            sm.session_key,
+            sm.session_id,
+            sm.last_used_at,
+            sm.status,
+            sm.session_key as topic_key,
+            twb.active_workspace_path as workspace_path
+          FROM session_mappings sm
+          LEFT JOIN topic_workspace_bindings twb
+            ON twb.topic_key = sm.session_key
+          WHERE sm.session_key = $session_key
         `,
       )
       .get({ session_key: sessionKey }) as {
@@ -282,27 +285,26 @@ export class SqliteSessionStore {
     };
 
     if (filters.status) {
-      whereParts.push("status = $status");
+      whereParts.push("sm.status = $status");
       params.status = filters.status;
     }
 
     if (filters.topicKey) {
-      whereParts.push("json_extract(session_key, '$[0]') = $topic_key");
+      whereParts.push("sm.session_key = $topic_key");
       params.topic_key = filters.topicKey;
     }
 
     if (filters.workspacePath) {
-      whereParts.push("json_extract(session_key, '$[1]') = $workspace_path");
+      whereParts.push("twb.active_workspace_path = $workspace_path");
       params.workspace_path = filters.workspacePath;
     }
 
     if (filters.q) {
       whereParts.push(`
         (
-          LOWER(session_key) LIKE $q
-          OR LOWER(session_id) LIKE $q
-          OR LOWER(COALESCE(json_extract(session_key, '$[0]'), '')) LIKE $q
-          OR LOWER(COALESCE(json_extract(session_key, '$[1]'), '')) LIKE $q
+          LOWER(sm.session_key) LIKE $q
+          OR LOWER(sm.session_id) LIKE $q
+          OR LOWER(COALESCE(twb.active_workspace_path, '')) LIKE $q
         )
       `);
       params.q = `%${filters.q.toLowerCase()}%`;
@@ -315,15 +317,17 @@ export class SqliteSessionStore {
       .query(
         `
           SELECT
-            session_key,
-            session_id,
-            last_used_at,
-            status,
-            json_extract(session_key, '$[0]') as topic_key,
-            json_extract(session_key, '$[1]') as workspace_path
-          FROM session_mappings
+            sm.session_key,
+            sm.session_id,
+            sm.last_used_at,
+            sm.status,
+            sm.session_key as topic_key,
+            twb.active_workspace_path as workspace_path
+          FROM session_mappings sm
+          LEFT JOIN topic_workspace_bindings twb
+            ON twb.topic_key = sm.session_key
           ${whereClause}
-          ORDER BY last_used_at DESC
+          ORDER BY sm.last_used_at DESC
           LIMIT $limit OFFSET $offset
         `,
       )
@@ -340,7 +344,9 @@ export class SqliteSessionStore {
       .query(
         `
           SELECT COUNT(*) as total
-          FROM session_mappings
+          FROM session_mappings sm
+          LEFT JOIN topic_workspace_bindings twb
+            ON twb.topic_key = sm.session_key
           ${whereClause}
         `,
       )

@@ -159,7 +159,7 @@ provider_default_model() {
     openai)     echo "gpt-4o-mini" ;;
     anthropic)  echo "claude-sonnet-4-20250514" ;;
     cerebras)   echo "llama-3.3-70b" ;;
-    *)          echo "openrouter/auto" ;;
+    *)          echo "llama-3.3-70b-versatile" ;;
   esac
 }
 
@@ -198,9 +198,9 @@ setup_config() {
   echo ""
   info "Supported LLM providers: openrouter, groq, google, openai, anthropic, cerebras"
   local provider
-  printf 'LLM provider [openrouter]: ' >&2
+  printf 'LLM provider [groq]: ' >&2
   read -r provider < /dev/tty
-  provider="${provider:-openrouter}"
+  provider="${provider:-groq}"
 
   local env_var_name
   env_var_name=$(provider_env_var "$provider")
@@ -255,6 +255,26 @@ EOF
   chmod 600 "$SECRETS_FILE"
   ok "Wrote secrets to ${SECRETS_FILE}"
 
+  # optional: startup announcement
+  echo ""
+  info "Optional: send a Telegram message when the assistant starts up"
+  local announce_chat_id=""
+  local announce_thread_id="null"
+  printf 'Telegram chat ID for startup announcements (press Enter to skip): ' >&2
+  read -r announce_chat_id < /dev/tty
+  if [ -n "$announce_chat_id" ]; then
+    local thread_input=""
+    printf 'Thread ID for startup announcements [1 = General]: ' >&2
+    read -r thread_input < /dev/tty
+    thread_input="${thread_input:-1}"
+    announce_thread_id="\"${thread_input}\""
+    announce_chat_id="\"${announce_chat_id}\""
+    ok "Startup announcements configured"
+  else
+    announce_chat_id="null"
+    info "Skipped startup announcement setup"
+  fi
+
   # write config with sensible defaults
   cat > "$CONFIG_FILE" << EOF
 {
@@ -272,7 +292,9 @@ EOF
   "relayTimeoutMs": 300000,
   "progressFirstMs": 10000,
   "progressEveryMs": 30000,
-  "progressMaxCount": 3
+  "progressMaxCount": 3,
+  "startupAnnounceChatId": ${announce_chat_id},
+  "startupAnnounceThreadId": ${announce_thread_id}
 }
 EOF
   ok "Wrote config to ${CONFIG_FILE}"

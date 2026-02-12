@@ -28,17 +28,27 @@ describe("SqliteSessionStore admin queries", () => {
 
     try {
       await store.upsertSession({
-        sessionKey: JSON.stringify(["chat-a:root", "/repo/a"]),
+        sessionKey: "chat-a:root",
         sessionId: "ses-a",
         status: "active",
         lastUsedAt: "2026-02-08T01:00:00.000Z",
       });
+      await store.setTopicWorkspace(
+        "chat-a:root",
+        "/repo/a",
+        "2026-02-08T01:00:00.000Z",
+      );
       await store.upsertSession({
-        sessionKey: JSON.stringify(["chat-b:42", "/repo/b"]),
+        sessionKey: "chat-b:42",
         sessionId: "ses-b",
         status: "stale",
         lastUsedAt: "2026-02-08T02:00:00.000Z",
       });
+      await store.setTopicWorkspace(
+        "chat-b:42",
+        "/repo/b",
+        "2026-02-08T02:00:00.000Z",
+      );
 
       const all = await store.listSessions({ page: 1, pageSize: 25 });
       expect(all.total).toBe(2);
@@ -61,13 +71,18 @@ describe("SqliteSessionStore admin queries", () => {
     const { store, cleanup } = await buildStore();
 
     try {
-      const sessionKey = JSON.stringify(["chat-c:root", "/repo/c"]);
+      const sessionKey = "chat-c:root";
       await store.upsertSession({
         sessionKey,
         sessionId: "ses-c",
         status: "active",
         lastUsedAt: "2026-02-08T03:00:00.000Z",
       });
+      await store.setTopicWorkspace(
+        sessionKey,
+        "/repo/c",
+        "2026-02-08T03:00:00.000Z",
+      );
 
       const id = encodeSessionKeyId(sessionKey);
       const decoded = decodeSessionKeyId(id);
@@ -83,7 +98,7 @@ describe("SqliteSessionStore admin queries", () => {
 });
 
 describe("SqliteSessionStore turn events", () => {
-  const sessionKey = JSON.stringify(["chat-t:root", "/repo/t"]);
+  const sessionKey = "chat-t:root";
 
   test("inserts and retrieves events by turnId", async () => {
     const { store, cleanup } = await buildStore();
@@ -155,9 +170,7 @@ describe("SqliteSessionStore turn events", () => {
       expect(events[1]?.turnId).toBe("turn-b");
 
       // Different session key returns empty
-      const other = await store.listTurnEvents(
-        JSON.stringify(["other:root", "/other"]),
-      );
+      const other = await store.listTurnEvents("other:root");
       expect(other).toHaveLength(0);
     } finally {
       await cleanup();

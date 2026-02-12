@@ -256,11 +256,11 @@ export const loadConfig = (): AppConfig => {
   const piAgentProvider =
     process.env.PI_AGENT_PROVIDER?.trim() ||
     asOptionalString(fileConfig.piAgentProvider) ||
-    "openrouter";
+    "groq";
   const piAgentModel =
     process.env.PI_AGENT_MODEL?.trim() ||
     asOptionalString(fileConfig.piAgentModel) ||
-    "openrouter/auto";
+    "llama-3.3-70b-versatile";
   const piAgentApiKey =
     process.env.PI_AGENT_API_KEY?.trim() ||
     asOptionalNullableString(fileConfig.piAgentApiKey) ||

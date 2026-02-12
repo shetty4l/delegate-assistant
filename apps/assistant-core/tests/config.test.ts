@@ -79,9 +79,9 @@ describe("pi_agent API key validation", () => {
     expect(config.modelProvider).toBe("pi_agent");
   });
 
-  test("accepts OPENROUTER_API_KEY for openrouter provider (default)", () => {
+  test("accepts OPENROUTER_API_KEY for openrouter provider", () => {
     envSnap = saveEnv();
-    writeConfig(minimalConfig());
+    writeConfig(minimalConfig({ piAgentProvider: "openrouter" }));
     delete process.env.PI_AGENT_API_KEY;
     process.env.OPENROUTER_API_KEY = "sk-or-test";
 
@@ -159,7 +159,7 @@ describe("pi_agent API key validation", () => {
 
   test("throws with helpful message for openrouter when no key is set", () => {
     envSnap = saveEnv();
-    writeConfig(minimalConfig());
+    writeConfig(minimalConfig({ piAgentProvider: "openrouter" }));
     delete process.env.PI_AGENT_API_KEY;
     delete process.env.OPENROUTER_API_KEY;
 
@@ -190,22 +190,22 @@ describe("pi_agent API key validation", () => {
 });
 
 describe("pi_agent default values", () => {
-  test("defaults piAgentProvider to openrouter", () => {
+  test("defaults piAgentProvider to groq", () => {
     envSnap = saveEnv();
     writeConfig(minimalConfig());
     process.env.PI_AGENT_API_KEY = "sk-test";
 
     const config = loadConfig();
-    expect(config.piAgentProvider).toBe("openrouter");
+    expect(config.piAgentProvider).toBe("groq");
   });
 
-  test("defaults piAgentModel to openrouter/auto", () => {
+  test("defaults piAgentModel to llama-3.3-70b-versatile", () => {
     envSnap = saveEnv();
     writeConfig(minimalConfig());
     process.env.PI_AGENT_API_KEY = "sk-test";
 
     const config = loadConfig();
-    expect(config.piAgentModel).toBe("openrouter/auto");
+    expect(config.piAgentModel).toBe("llama-3.3-70b-versatile");
   });
 
   test("config file overrides defaults", () => {

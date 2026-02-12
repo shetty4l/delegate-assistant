@@ -53,6 +53,12 @@ export class PiAgentModelAdapter implements ModelPort {
     // specific literal types from its KnownProvider + model-id generic params.
     const provider: KnownProvider = this.config.provider as KnownProvider;
     const model = getModel(provider as any, this.config.model as any);
+    if (!model) {
+      throw new Error(
+        `Model "${this.config.model}" not found in provider "${this.config.provider}" registry. ` +
+          `Check that piAgentProvider and piAgentModel are valid in your config.`,
+      );
+    }
     const systemPrompt = loadSystemPrompt({
       workspacePath: this.config.workspacePath,
       systemPromptPath: this.config.systemPromptPath,
@@ -328,13 +334,16 @@ export class PiAgentModelAdapter implements ModelPort {
   }
 
   async ping(): Promise<void> {
-    // Verify we can resolve the model
-    try {
-      getModel(this.config.provider as any, this.config.model as any);
-    } catch (err) {
-      throw new Error(`Pi Agent configuration error: ${String(err)}`, {
-        cause: err,
-      });
+    // Verify we can resolve the model — getModel() returns undefined on miss
+    const model = getModel(
+      this.config.provider as any,
+      this.config.model as any,
+    );
+    if (!model) {
+      throw new Error(
+        `Pi Agent configuration error: Model "${this.config.model}" not found in provider "${this.config.provider}" registry. ` +
+          `Check that piAgentProvider and piAgentModel are valid in your config.`,
+      );
     }
   }
 
