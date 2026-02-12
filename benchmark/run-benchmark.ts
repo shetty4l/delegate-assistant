@@ -105,6 +105,17 @@ Guidelines:
 - If a request is ambiguous, ask for clarification rather than guessing.
 - When you don't know something, say so honestly.`;
 
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * Strip <think>...</think> blocks from model responses.
+ * Some models (e.g. qwen3) emit chain-of-thought reasoning in <think> tags
+ * that shouldn't be compared as user-facing output.
+ */
+function stripThinkingBlocks(text: string): string {
+  return text.replace(/<think>[\s\S]*?<\/think>\s*/g, "").trim();
+}
+
 // ── Control model (Groq via pi-ai) ─────────────────────────────────────────
 
 async function runControl(
@@ -134,10 +145,12 @@ async function runControl(
 
   const latencyMs = performance.now() - start;
 
-  const responseText = assistantMsg.content
-    .filter((c): c is { type: "text"; text: string } => c.type === "text")
-    .map((c) => c.text)
-    .join("\n");
+  const responseText = stripThinkingBlocks(
+    assistantMsg.content
+      .filter((c): c is { type: "text"; text: string } => c.type === "text")
+      .map((c) => c.text)
+      .join("\n"),
+  );
 
   return {
     response: responseText,
@@ -260,7 +273,7 @@ async function main() {
       const recalled = await engramRecall({
         url: config.engramUrl,
         query: prompt.engram_query,
-        limit: 5,
+        limit: 3,
         min_strength: 0.3,
       });
 
