@@ -369,6 +369,14 @@ const runWorkerProcess = async (): Promise<number> => {
   }
 
   try {
+    if (modelPort instanceof TieredRouterAdapter) {
+      await modelPort.dispose();
+    }
+  } catch {
+    // best-effort: don't block shutdown if queue drain fails
+  }
+
+  try {
     server.stop(true);
   } catch {
     // ignore stop failures on shutdown

@@ -19,6 +19,7 @@
       "dependencies": {
         "@delegate/adapters-model-pi-agent": "workspace:*",
         "@delegate/adapters-model-stub": "workspace:*",
+        "@delegate/adapters-model-tiered-router": "workspace:*",
         "@delegate/adapters-session-store-sqlite": "workspace:*",
         "@delegate/adapters-telegram": "workspace:*",
         "@delegate/domain": "workspace:*",

@@ -1,8 +1,8 @@
 /**
- * Engram HTTP client for memory recall.
+ * Engram HTTP client for memory recall and storage.
  *
- * Gracefully degrades: never throws on failure, returns empty results.
- * Used for pre-flight recall before T0 classification and T1 generation.
+ * Recall gracefully degrades: never throws on failure, returns empty results.
+ * Remember throws on failure — callers (MemoryQueue) handle errors per-item.
  */
 
 const ENGRAM_TIMEOUT_MS = 2_000;
@@ -111,6 +111,33 @@ export async function engramRecall(opts: {
       }),
     );
     return EMPTY_RECALL;
+  }
+}
+
+/**
+ * Store a memory in Engram.
+ *
+ * Throws on failure — callers are expected to handle errors (e.g. MemoryQueue
+ * catches per-item and logs warnings).
+ */
+export async function engramRemember(opts: {
+  url: string;
+  content: string;
+  category?: string;
+}): Promise<void> {
+  const res = await fetch(`${opts.url}/remember`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      content: opts.content,
+      category: opts.category,
+    }),
+    signal: AbortSignal.timeout(ENGRAM_TIMEOUT_MS),
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Engram remember failed (${String(res.status)}): ${body}`);
   }
 }
 
