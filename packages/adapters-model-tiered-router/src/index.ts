@@ -1,10 +1,16 @@
 import type { ModelTurnResponse } from "@delegate/domain";
 import type { ModelPort, RespondInput } from "@delegate/ports";
+import { classify } from "./classifier";
 import { ollamaChat, ollamaHealthCheck } from "./ollama-client";
 import { T1_SYSTEM_PROMPT } from "./system-prompt";
-import type { HealthState, TieredRouterConfig } from "./types";
+import type {
+  ClassificationResult,
+  HealthState,
+  TieredRouterConfig,
+} from "./types";
 
 export type {
+  ClassificationResult,
   ClassifierConfig,
   EngramConfig,
   HealthState,
@@ -13,6 +19,14 @@ export type {
 } from "./types";
 
 const HEALTH_CHECK_INTERVAL_MS = 30_000;
+
+type T2Reason =
+  | "classifier_unhealthy"
+  | "classifier_error"
+  | "classified_t2"
+  | "low_confidence"
+  | "t1_unhealthy"
+  | "t1_error";
 
 const log = (event: string, fields: Record<string, unknown>): void => {
   console.log(JSON.stringify({ level: "info", event, ...fields }));
@@ -25,8 +39,9 @@ const logWarn = (event: string, fields: Record<string, unknown>): void => {
 /**
  * Tiered model router that implements ModelPort.
  *
- * Routes requests to T1 (local Ollama) when healthy, falling back to
- * T2 (cloud model via injected ModelPort) when T1 is unreachable.
+ * Classifies requests via T0 (3B model on Mac Mini), then routes to
+ * T1 (14B on GPU) for simple tasks or T2 (cloud) for complex ones.
+ * Falls back to T2 when any local component is unavailable.
  */
 export class TieredRouterAdapter implements ModelPort {
   private readonly config: TieredRouterConfig;
@@ -37,8 +52,14 @@ export class TieredRouterAdapter implements ModelPort {
   /** Sessions currently being handled by T2, for abort forwarding. */
   private readonly t2ActiveSessions = new Set<string>();
 
-  /** Cached T1 Ollama health state. */
+  /** Cached T1 Ollama health state (GPU). */
   private t1Health: HealthState = {
+    healthy: true,
+    lastCheckedAt: 0,
+  };
+
+  /** Cached classifier Ollama health state (Mac Mini). */
+  private classifierHealth: HealthState = {
     healthy: true,
     lastCheckedAt: 0,
   };
@@ -51,26 +72,76 @@ export class TieredRouterAdapter implements ModelPort {
     const sessionKey =
       input.sessionId ?? `${input.chatId}:${input.threadId ?? "root"}`;
 
-    // Check if T1 is healthy before attempting local inference
+    // Step 1: Check if classifier is available
+    const classifierAvailable = await this.isClassifierHealthy();
+
+    if (!classifierAvailable) {
+      return this.handleT2(input, sessionKey, "classifier_unhealthy");
+    }
+
+    // Step 2: Classify the request
+    let classification: ClassificationResult;
+    try {
+      classification = await classify(this.config.classifier, input.text);
+
+      log("tiered_router.classify.complete", {
+        sessionKey,
+        tier: classification.tier,
+        confidence: classification.confidence,
+        reason: classification.reason,
+        category: classification.category,
+      });
+    } catch (error) {
+      // Classification failed — mark unhealthy and fall back to T2
+      this.classifierHealth = {
+        healthy: false,
+        lastCheckedAt: Date.now(),
+        error: error instanceof Error ? error.message : String(error),
+      };
+
+      logWarn("tiered_router.classify.error", {
+        sessionKey,
+        error: error instanceof Error ? error.message : String(error),
+        fallback: "t2",
+      });
+
+      return this.handleT2(input, sessionKey, "classifier_error");
+    }
+
+    // Step 3: Route based on classification
+    if (classification.tier === "t2") {
+      return this.handleT2(input, sessionKey, "classified_t2");
+    }
+
+    if (
+      classification.confidence < this.config.classifier.confidenceThreshold
+    ) {
+      log("tiered_router.classify.low_confidence", {
+        sessionKey,
+        confidence: classification.confidence,
+        threshold: this.config.classifier.confidenceThreshold,
+        fallback: "t2",
+      });
+      return this.handleT2(input, sessionKey, "low_confidence");
+    }
+
+    // Step 4: Classified as T1 — check T1 health and attempt local inference
     const t1Available = await this.isT1Healthy();
 
     if (!t1Available) {
       return this.handleT2(input, sessionKey, "t1_unhealthy");
     }
 
-    // Attempt T1, fall back to T2 on error
     const abortController = new AbortController();
     this.activeRequests.set(sessionKey, abortController);
 
     try {
       return await this.handleT1(input, sessionKey, abortController.signal);
     } catch (error) {
-      // If the request was intentionally aborted, don't fall back
       if (abortController.signal.aborted) {
         throw error;
       }
 
-      // T1 failed unexpectedly — mark unhealthy and fall back to T2
       this.t1Health = {
         healthy: false,
         lastCheckedAt: Date.now(),
@@ -90,19 +161,27 @@ export class TieredRouterAdapter implements ModelPort {
   }
 
   async ping(): Promise<void> {
+    const classifierResult = await ollamaHealthCheck(
+      this.config.classifier.ollamaUrl,
+      this.config.classifier.model,
+    );
+    if (!classifierResult.ok) {
+      logWarn("tiered_router.ping.classifier_unavailable", {
+        error: classifierResult.error,
+      });
+    }
+
     const t1Result = await ollamaHealthCheck(
       this.config.t1.ollamaUrl,
       this.config.t1.model,
     );
-
-    // T1 failure is non-fatal for ping — we can still operate via T2
     if (!t1Result.ok) {
       logWarn("tiered_router.ping.t1_unavailable", {
         error: t1Result.error,
       });
     }
 
-    // T2 ping is required — if the cloud backend is down, we're degraded
+    // T2 ping is required — if the cloud backend is down, we're fully degraded
     if (this.config.t2Backend.ping) {
       await this.config.t2Backend.ping();
     }
@@ -110,7 +189,6 @@ export class TieredRouterAdapter implements ModelPort {
 
   /** Abort a running request for the given session. */
   abort(sessionKey: string): void {
-    // Try aborting T1 (Ollama fetch)
     const controller = this.activeRequests.get(sessionKey);
     if (controller) {
       controller.abort();
@@ -118,7 +196,6 @@ export class TieredRouterAdapter implements ModelPort {
       return;
     }
 
-    // Try forwarding abort to T2 backend
     if (this.t2ActiveSessions.has(sessionKey)) {
       const backend = this.config.t2Backend as unknown as Record<
         string,
@@ -131,36 +208,51 @@ export class TieredRouterAdapter implements ModelPort {
   }
 
   // ---------------------------------------------------------------------------
-  // Health check
+  // Health checks (separate state per Ollama instance)
   // ---------------------------------------------------------------------------
 
+  private async isClassifierHealthy(): Promise<boolean> {
+    return this.checkOllamaHealth(
+      this.classifierHealth,
+      this.config.classifier.ollamaUrl,
+      this.config.classifier.model,
+      "tiered_router.classifier",
+    );
+  }
+
   private async isT1Healthy(): Promise<boolean> {
-    const now = Date.now();
-    const age = now - this.t1Health.lastCheckedAt;
-
-    // Use cached result if fresh enough
-    if (age < HEALTH_CHECK_INTERVAL_MS) {
-      return this.t1Health.healthy;
-    }
-
-    // Perform a fresh health check
-    const result = await ollamaHealthCheck(
+    return this.checkOllamaHealth(
+      this.t1Health,
       this.config.t1.ollamaUrl,
       this.config.t1.model,
+      "tiered_router.t1",
     );
+  }
 
-    const wasUnhealthy = !this.t1Health.healthy;
+  private async checkOllamaHealth(
+    state: HealthState,
+    url: string,
+    model: string,
+    logPrefix: string,
+  ): Promise<boolean> {
+    const now = Date.now();
+    const age = now - state.lastCheckedAt;
 
-    this.t1Health = {
-      healthy: result.ok,
-      lastCheckedAt: now,
-      error: result.ok ? undefined : result.error,
-    };
+    if (age < HEALTH_CHECK_INTERVAL_MS) {
+      return state.healthy;
+    }
+
+    const result = await ollamaHealthCheck(url, model);
+    const wasUnhealthy = !state.healthy;
+
+    state.healthy = result.ok;
+    state.lastCheckedAt = now;
+    state.error = result.ok ? undefined : result.error;
 
     if (result.ok && wasUnhealthy) {
-      log("tiered_router.t1.recovered", {});
+      log(`${logPrefix}.recovered`, {});
     } else if (!result.ok) {
-      logWarn("tiered_router.t1.unhealthy", {
+      logWarn(`${logPrefix}.unhealthy`, {
         error: result.error,
         fallback: "t2",
       });
@@ -220,13 +312,13 @@ export class TieredRouterAdapter implements ModelPort {
   }
 
   // ---------------------------------------------------------------------------
-  // T2 handler (cloud model fallback)
+  // T2 handler (cloud model)
   // ---------------------------------------------------------------------------
 
   private async handleT2(
     input: RespondInput,
     sessionKey: string,
-    reason: "t1_unhealthy" | "t1_error",
+    reason: T2Reason,
   ): Promise<ModelTurnResponse> {
     log("tiered_router.t2.start", { sessionKey, reason });
 

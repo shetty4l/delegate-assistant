@@ -46,6 +46,14 @@ export type HealthState = {
   error?: string;
 };
 
+/** Result from the T0 classifier. */
+export type ClassificationResult = {
+  tier: "t1" | "t2";
+  confidence: number;
+  reason: string;
+  category: string;
+};
+
 /** Result from an Ollama /api/chat call. */
 export type OllamaChatResult = {
   /** The model's response text. */
