@@ -88,12 +88,13 @@ async function engramRemember(
 async function engramRecallSeeds(
   url: string,
 ): Promise<Array<{ id: string; content: string }>> {
-  // Recall with a query that matches the seed prefix
+  // Recall with a query that matches the seed prefix.
+  // Quote "benchmark-seed" to prevent FTS5 from parsing the hyphen as a column separator.
   const res = await fetch(`${url}/recall`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      query: "benchmark-seed delegate-assistant",
+      query: '"benchmark-seed" delegate-assistant',
       limit: 50,
       min_strength: 0.0,
     }),
@@ -160,7 +161,12 @@ async function main() {
   if (clean) {
     // Remove seeded memories
     console.log("Cleaning seeded memories...\n");
-    const seeds = await engramRecallSeeds(engramUrl);
+    let seeds: Array<{ id: string; content: string }> = [];
+    try {
+      seeds = await engramRecallSeeds(engramUrl);
+    } catch {
+      // Fresh DB or FTS error -- nothing to clean
+    }
 
     if (seeds.length === 0) {
       console.log("No seeded memories found.");
@@ -187,7 +193,12 @@ async function main() {
   console.log(`Seeding ${SEED_MEMORIES.length} memories...\n`);
 
   // Check for existing seeds to avoid duplicates
-  const existing = await engramRecallSeeds(engramUrl);
+  let existing: Array<{ id: string; content: string }> = [];
+  try {
+    existing = await engramRecallSeeds(engramUrl);
+  } catch {
+    // Fresh DB or FTS error -- no existing seeds, proceed
+  }
   if (existing.length > 0) {
     console.log(
       `Found ${existing.length} existing seeded memories. Run --clean first to remove them, or they will coexist with new seeds.\n`,
