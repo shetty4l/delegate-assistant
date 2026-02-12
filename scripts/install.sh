@@ -176,6 +176,11 @@ provider_prompt_label() {
 }
 
 setup_config() {
+  if [ -f "$SECRETS_FILE" ] && [ -f "$CONFIG_FILE" ]; then
+    ok "Existing config and secrets found, skipping setup"
+    return
+  fi
+
   mkdir -p "$CONFIG_DIR"
 
   info "Configuring delegate-assistant..."
@@ -339,10 +344,17 @@ install_launch_agents() {
     "com.suyash.delegate-assistant-updater"
   )
 
+  # unload all agents first
+  for label in "${agents[@]}"; do
+    launchctl bootout "gui/${uid}/${label}" 2>/dev/null || true
+  done
+
+  # allow launchd to fully unload before re-bootstrapping
+  sleep 1
+
+  # bootstrap all agents
   for label in "${agents[@]}"; do
     local plist="${LAUNCH_AGENTS_DIR}/${label}.plist"
-    # unload if already loaded
-    launchctl bootout "gui/${uid}/${label}" 2>/dev/null || true
     launchctl bootstrap "gui/${uid}" "$plist"
     launchctl enable "gui/${uid}/${label}"
     ok "Loaded LaunchAgent: ${label}"
