@@ -12,7 +12,9 @@
     "baseUrl": ".",
     "paths": {
       "@assistant-core/src/*": ["apps/assistant-core/src/*"],
+      "@delegate/domain": ["packages/domain/src/index.ts"],
       "@delegate/domain/*": ["packages/domain/src/*"],
+      "@delegate/ports": ["packages/ports/src/index.ts"],
       "@delegate/ports/*": ["packages/ports/src/*"],
       "@delegate/adapters-telegram/*": ["packages/adapters-telegram/src/*"],
       "@delegate/adapters-model-stub/*": ["packages/adapters-model-stub/src/*"],

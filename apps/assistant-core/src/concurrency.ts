@@ -99,10 +99,10 @@ export class TopicQueue {
 export class TopicQueueMap {
   private readonly queues = new Map<string, TopicQueue>();
 
-  getOrCreate(key: string): TopicQueue {
+  getOrCreate(key: string, onError?: (error: unknown) => void): TopicQueue {
     let queue = this.queues.get(key);
     if (!queue) {
-      queue = new TopicQueue(() => this.queues.delete(key));
+      queue = new TopicQueue(() => this.queues.delete(key), onError);
       this.queues.set(key, queue);
     }
     return queue;
