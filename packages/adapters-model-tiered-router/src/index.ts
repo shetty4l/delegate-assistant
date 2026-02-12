@@ -1,7 +1,8 @@
 import type { ModelTurnResponse } from "@delegate/domain";
 import type { ModelPort, RespondInput } from "@delegate/ports";
 import { classify } from "./classifier";
-import { engramRecall } from "./engram-client";
+import { engramHealthCheck, engramRecall } from "./engram-client";
+import { MemoryQueue } from "./memory-queue";
 import { ollamaChat, ollamaHealthCheck } from "./ollama-client";
 import { T1_SYSTEM_PROMPT } from "./system-prompt";
 import type {
@@ -57,6 +58,9 @@ export class TieredRouterAdapter implements ModelPort {
   /** Sessions currently being handled by T2, for abort forwarding. */
   private readonly t2ActiveSessions = new Set<string>();
 
+  /** Buffered queue for storing routing decisions to Engram. */
+  private readonly memoryQueue: MemoryQueue;
+
   /** Cached T1 Ollama health state (GPU). */
   private t1Health: HealthState = {
     healthy: true,
@@ -69,8 +73,16 @@ export class TieredRouterAdapter implements ModelPort {
     lastCheckedAt: 0,
   };
 
+  /** Cached Engram health state. */
+  private engramHealth: HealthState = {
+    healthy: true,
+    lastCheckedAt: 0,
+  };
+
   constructor(config: TieredRouterConfig) {
     this.config = config;
+    this.memoryQueue = new MemoryQueue(config.engram.url);
+    this.memoryQueue.start();
   }
 
   async respond(input: RespondInput): Promise<ModelTurnResponse> {
@@ -79,27 +91,39 @@ export class TieredRouterAdapter implements ModelPort {
       input.sessionId ?? `${input.chatId}:${input.threadId ?? "root"}`;
     const preview = promptPreview(input.text);
 
-    // Step 1: Recall memories from Engram (fire-and-forget on failure)
-    const engramStart = performance.now();
-    const { engram } = this.config;
-    const memories = await engramRecall({
-      url: engram.url,
-      query: input.text,
-      maxMemories: engram.maxMemories,
-      minStrength: engram.minStrength,
-    });
-    const engramMs = Math.round(performance.now() - engramStart);
+    // Step 1: Recall memories from Engram (skip if recently unhealthy)
+    let memoryContext: string | undefined;
+    const engramAvailable = await this.isEngramHealthy();
 
-    if (memories.count > 0) {
-      log("tiered_router.engram.recalled", {
-        sessionKey,
-        count: memories.count,
-        engramMs,
-        fallbackMode: memories.fallbackMode,
+    if (engramAvailable) {
+      const engramStart = performance.now();
+      const { engram } = this.config;
+      const memories = await engramRecall({
+        url: engram.url,
+        query: input.text,
+        maxMemories: engram.maxMemories,
+        minStrength: engram.minStrength,
       });
-    }
+      const engramMs = Math.round(performance.now() - engramStart);
 
-    const memoryContext = memories.formatted || undefined;
+      if (memories.count > 0) {
+        log("tiered_router.engram.recalled", {
+          sessionKey,
+          count: memories.count,
+          engramMs,
+          fallbackMode: memories.fallbackMode,
+        });
+        memoryContext = memories.formatted || undefined;
+      } else if (engramMs >= 1_500) {
+        // Slow empty response likely means Engram timed out — mark unhealthy
+        // so subsequent requests skip the 2s penalty.
+        this.engramHealth = {
+          healthy: false,
+          lastCheckedAt: Date.now(),
+          error: `Engram recall took ${String(engramMs)}ms (likely timeout)`,
+        };
+      }
+    }
 
     // Step 2: Check if classifier is available
     const classifierAvailable = await this.isClassifierHealthy();
@@ -160,6 +184,8 @@ export class TieredRouterAdapter implements ModelPort {
         sessionKey,
         preview,
         respondStart,
+        classification,
+        "classified_t2",
       );
     }
 
@@ -177,6 +203,8 @@ export class TieredRouterAdapter implements ModelPort {
         sessionKey,
         preview,
         respondStart,
+        classification,
+        "low_confidence",
       );
     }
 
@@ -189,6 +217,8 @@ export class TieredRouterAdapter implements ModelPort {
         sessionKey,
         preview,
         respondStart,
+        classification,
+        "t1_unhealthy",
       );
     }
 
@@ -202,7 +232,13 @@ export class TieredRouterAdapter implements ModelPort {
         abortController.signal,
         memoryContext,
       );
-      return this.finalize(response, sessionKey, preview, respondStart);
+      return this.finalize(
+        response,
+        sessionKey,
+        preview,
+        respondStart,
+        classification,
+      );
     } catch (error) {
       if (abortController.signal.aborted) {
         throw error;
@@ -225,18 +261,22 @@ export class TieredRouterAdapter implements ModelPort {
         sessionKey,
         preview,
         respondStart,
+        classification,
+        "t1_error",
       );
     } finally {
       this.activeRequests.delete(sessionKey);
     }
   }
 
-  /** Log the end-to-end routing summary. */
+  /** Log the end-to-end routing summary and enqueue routing decision. */
   private finalize(
     response: ModelTurnResponse,
     sessionKey: string,
     preview: string,
     respondStart: number,
+    classification?: ClassificationResult,
+    t2Reason?: T2Reason,
   ): ModelTurnResponse {
     const totalMs = Math.round(performance.now() - respondStart);
     log("tiered_router.respond.complete", {
@@ -245,7 +285,32 @@ export class TieredRouterAdapter implements ModelPort {
       totalMs,
       prompt: preview,
     });
+
+    // Enqueue routing decision for async Engram storage.
+    // Only store when classification actually happened (skip classifier_unhealthy/error).
+    if (classification) {
+      const actualTier = response.tier ?? classification.tier;
+      const reason = t2Reason
+        ? `${classification.reason} [fallback: ${t2Reason}]`
+        : classification.reason;
+
+      this.memoryQueue.enqueue({
+        content:
+          `[routing-decision] tier=${actualTier.toUpperCase()}` +
+          ` confidence=${String(classification.confidence)}` +
+          ` category=${classification.category}` +
+          ` reason="${reason}"` +
+          ` prompt="${preview}"`,
+        category: "insight",
+      });
+    }
+
     return response;
+  }
+
+  /** Drain the memory queue. Call on process shutdown. */
+  async dispose(): Promise<void> {
+    await this.memoryQueue.dispose();
   }
 
   async ping(): Promise<void> {
@@ -296,8 +361,34 @@ export class TieredRouterAdapter implements ModelPort {
   }
 
   // ---------------------------------------------------------------------------
-  // Health checks (separate state per Ollama instance)
+  // Health checks (separate state per Ollama instance + Engram)
   // ---------------------------------------------------------------------------
+
+  private async isEngramHealthy(): Promise<boolean> {
+    const now = Date.now();
+    const age = now - this.engramHealth.lastCheckedAt;
+
+    if (age < HEALTH_CHECK_INTERVAL_MS) {
+      return this.engramHealth.healthy;
+    }
+
+    const result = await engramHealthCheck(this.config.engram.url);
+    const wasUnhealthy = !this.engramHealth.healthy;
+
+    this.engramHealth.healthy = result.ok;
+    this.engramHealth.lastCheckedAt = now;
+    this.engramHealth.error = result.ok ? undefined : result.error;
+
+    if (result.ok && wasUnhealthy) {
+      log("tiered_router.engram.recovered", {});
+    } else if (!result.ok) {
+      logWarn("tiered_router.engram.unhealthy", {
+        error: result.error,
+      });
+    }
+
+    return result.ok;
+  }
 
   private async isClassifierHealthy(): Promise<boolean> {
     return this.checkOllamaHealth(
