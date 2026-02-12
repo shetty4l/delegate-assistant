@@ -284,9 +284,13 @@ install_wrapper_scripts() {
   cp "${INSTALL_BASE}/latest/deploy/start-assistant.sh" "${INSTALL_BASE}/start-assistant.sh"
   cp "${INSTALL_BASE}/latest/deploy/start-web.sh" "${INSTALL_BASE}/start-web.sh"
   cp "${INSTALL_BASE}/latest/deploy/update-check.sh" "${INSTALL_BASE}/update-check.sh"
+  cp "${INSTALL_BASE}/latest/deploy/update-check-engram.sh" "${INSTALL_BASE}/update-check-engram.sh"
+  cp "${INSTALL_BASE}/latest/deploy/update-check-delegate.sh" "${INSTALL_BASE}/update-check-delegate.sh"
   chmod +x "${INSTALL_BASE}/start-assistant.sh"
   chmod +x "${INSTALL_BASE}/start-web.sh"
   chmod +x "${INSTALL_BASE}/update-check.sh"
+  chmod +x "${INSTALL_BASE}/update-check-engram.sh"
+  chmod +x "${INSTALL_BASE}/update-check-delegate.sh"
 
   ok "Wrapper scripts installed"
 }
