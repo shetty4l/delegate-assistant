@@ -24,7 +24,8 @@
     "format:check": "biome check apps/**/src packages/**/src docs README.md .github",
     "docs:check": "remark docs README.md --frail",
     "verify": "bun run typecheck && bun run format && bun run lint && bun run format:check && bun run build:web && bun run test && bun run docs:check",
-    "validate": "bun run verify"
+    "validate": "bun run verify",
+    "version:bump": "bun run scripts/version-bump.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.13",
