@@ -215,7 +215,9 @@ setup_config() {
     api_key=$(prompt_value "$env_var_name" "${prompt_label} (required)")
   fi
 
-  # write secrets
+  # write secrets (pre-create with restrictive permissions to avoid a
+  # window where the file is world-readable before chmod 600)
+  install -m 600 /dev/null "$SECRETS_FILE"
   cat > "$SECRETS_FILE" << EOF
 # delegate-assistant secrets -- do not commit
 TELEGRAM_BOT_TOKEN=${bot_token}

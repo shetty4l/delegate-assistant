@@ -49,6 +49,23 @@ jobs:
       - name: Write VERSION file
         run: echo "${{ steps.version.outputs.next_version }}" > VERSION
 
+      - name: Write BUILD_META.json
+        run: |
+          SHA="${{ github.event.workflow_run.head_sha }}"
+          SHORT_SHA="${SHA:0:7}"
+          BRANCH="${{ github.event.workflow_run.head_branch }}"
+          TITLE="$(git log -1 --format='%s' "$SHA")"
+          BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          cat > BUILD_META.json <<ENDJSON
+          {
+            "gitSha": "${SHA}",
+            "gitShortSha": "${SHORT_SHA}",
+            "gitBranch": "${BRANCH}",
+            "commitTitle": "${TITLE}",
+            "buildTimeUtc": "${BUILD_TIME}"
+          }
+          ENDJSON
+
       - name: Create source tarball
         run: |
           TAG="${{ steps.version.outputs.next_tag }}"
@@ -69,7 +86,8 @@ jobs:
             tsconfig.base.json \
             biome.json \
             .remarkrc.json \
-            VERSION
+            VERSION \
+            BUILD_META.json
 
       - name: Create tag and release
         env:
