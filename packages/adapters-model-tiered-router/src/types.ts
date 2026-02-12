@@ -39,6 +39,13 @@ export type TieredRouterConfig = {
   turnEventSink?: TurnEventSink;
 };
 
+/** Cached health check state for an Ollama instance. */
+export type HealthState = {
+  healthy: boolean;
+  lastCheckedAt: number;
+  error?: string;
+};
+
 /** Result from an Ollama /api/chat call. */
 export type OllamaChatResult = {
   /** The model's response text. */
