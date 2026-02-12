@@ -69,4 +69,84 @@ describe("loadBuildInfo", () => {
       await rm(repoRoot, { recursive: true, force: true });
     }
   });
+
+  test("reads git metadata from BUILD_META.json when env vars are unset", async () => {
+    const repoRoot = await mkdtemp(join(tmpdir(), "delegate-version-"));
+    await writeFile(join(repoRoot, "VERSION"), "0.4.0", "utf8");
+    await writeFile(
+      join(repoRoot, "BUILD_META.json"),
+      JSON.stringify({
+        gitSha: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+        gitShortSha: "a1b2c3d",
+        gitBranch: "main",
+        commitTitle: "feat: multi-provider support",
+        buildTimeUtc: "2026-02-10T09:28:56Z",
+      }),
+      "utf8",
+    );
+
+    try {
+      const buildInfo = loadBuildInfo({ repoRoot, env: {} });
+      expect(buildInfo.gitSha).toBe("a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2");
+      expect(buildInfo.gitShortSha).toBe("a1b2c3d");
+      expect(buildInfo.gitBranch).toBe("main");
+      expect(buildInfo.commitTitle).toBe("feat: multi-provider support");
+      expect(buildInfo.buildTimeUtc).toBe("2026-02-10T09:28:56Z");
+      expect(buildInfo.releaseVersion).toBe("0.4.0");
+    } finally {
+      await rm(repoRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("env vars take precedence over BUILD_META.json", async () => {
+    const repoRoot = await mkdtemp(join(tmpdir(), "delegate-version-"));
+    await writeFile(join(repoRoot, "VERSION"), "0.5.0", "utf8");
+    await writeFile(
+      join(repoRoot, "BUILD_META.json"),
+      JSON.stringify({
+        gitSha: "aaaa",
+        gitBranch: "release",
+        commitTitle: "from build meta",
+        buildTimeUtc: "2026-01-01T00:00:00Z",
+      }),
+      "utf8",
+    );
+
+    try {
+      const buildInfo = loadBuildInfo({
+        repoRoot,
+        env: {
+          GIT_SHA: "bbbb",
+          GIT_BRANCH: "main",
+          GIT_COMMIT_TITLE: "from env",
+          BUILD_TIME_UTC: "2026-02-02T00:00:00Z",
+        },
+      });
+      expect(buildInfo.gitSha).toBe("bbbb");
+      expect(buildInfo.gitBranch).toBe("main");
+      expect(buildInfo.commitTitle).toBe("from env");
+      expect(buildInfo.buildTimeUtc).toBe("2026-02-02T00:00:00Z");
+    } finally {
+      await rm(repoRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("falls back gracefully when neither env vars nor BUILD_META.json exist", async () => {
+    const repoRoot = await mkdtemp(join(tmpdir(), "delegate-version-"));
+    const fixedNow = new Date("2026-02-08T01:02:03.000Z");
+
+    try {
+      const buildInfo = loadBuildInfo({
+        repoRoot,
+        env: {},
+        now: () => fixedNow,
+      });
+      expect(buildInfo.gitSha).toBe("unknown");
+      expect(buildInfo.gitBranch).toBe("unknown");
+      expect(buildInfo.commitTitle).toBe("unknown");
+      expect(buildInfo.buildTimeUtc).toBe("2026-02-08T01:02:03.000Z");
+    } finally {
+      await rm(repoRoot, { recursive: true, force: true });
+    }
+  });
 });

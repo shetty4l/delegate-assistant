@@ -53,6 +53,25 @@ const readVersionFile = (repoRoot: string): string | null => {
   }
 };
 
+type BuildMeta = {
+  gitSha?: string;
+  gitShortSha?: string;
+  gitBranch?: string;
+  commitTitle?: string;
+  buildTimeUtc?: string;
+};
+
+/** Read BUILD_META.json written by the release workflow. */
+const readBuildMeta = (repoRoot: string): BuildMeta | null => {
+  try {
+    const metaPath = join(repoRoot, "BUILD_META.json");
+    const raw = readFileSync(metaPath, "utf8");
+    return JSON.parse(raw) as BuildMeta;
+  } catch {
+    return null;
+  }
+};
+
 const resolveRepoRoot = (): string => {
   const cwd = process.cwd();
   try {
@@ -75,12 +94,18 @@ export const loadBuildInfo = (input: BuildInfoInput = {}): BuildInfo => {
   const repoRoot = input.repoRoot ?? resolveRepoRoot();
   const env = input.env ?? process.env;
   const now = input.now ?? (() => new Date());
+  const buildMeta = readBuildMeta(repoRoot);
 
   const releaseVersion = readVersionFile(repoRoot) ?? DEV_VERSION;
-  const gitSha = asNonEmpty(env.GIT_SHA) ?? UNKNOWN;
-  const gitBranch = asNonEmpty(env.GIT_BRANCH) ?? UNKNOWN;
-  const commitTitle = asNonEmpty(env.GIT_COMMIT_TITLE) ?? UNKNOWN;
-  const buildTimeUtc = asNonEmpty(env.BUILD_TIME_UTC) ?? now().toISOString();
+  const gitSha = asNonEmpty(env.GIT_SHA) ?? buildMeta?.gitSha ?? UNKNOWN;
+  const gitBranch =
+    asNonEmpty(env.GIT_BRANCH) ?? buildMeta?.gitBranch ?? UNKNOWN;
+  const commitTitle =
+    asNonEmpty(env.GIT_COMMIT_TITLE) ?? buildMeta?.commitTitle ?? UNKNOWN;
+  const buildTimeUtc =
+    asNonEmpty(env.BUILD_TIME_UTC) ??
+    buildMeta?.buildTimeUtc ??
+    now().toISOString();
   const gitShortSha = shortSha(gitSha);
   const displayVersion = releaseVersion;
 

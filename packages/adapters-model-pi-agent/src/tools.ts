@@ -36,7 +36,10 @@ export const SHELL_COMMAND_DENYLIST: readonly DenylistEntry[] = [
   { pattern: /\breboot\b/, label: "reboot" },
   { pattern: /\bhalt\b/, label: "halt" },
   { pattern: /\bpoweroff\b/, label: "poweroff" },
-  { pattern: /:\(\)\{.*:\|:&\};:/, label: "fork bomb" },
+  {
+    pattern: /:\s*(\(\))?\s*\{.*:\s*\|\s*:.*&\s*\}\s*;\s*:/,
+    label: "fork bomb",
+  },
   { pattern: />\s*\/dev\/sd/, label: "> /dev/sd*" },
   { pattern: /\bchmod\s+-R\s+777\s+\/(?!\S)/, label: "chmod -R 777 /" },
   { pattern: /\bchown\s+-R\s+\S+\s+\/(?!\S)/, label: "chown -R ... /" },

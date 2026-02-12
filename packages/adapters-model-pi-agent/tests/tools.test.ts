@@ -319,8 +319,20 @@ describe("matchesDenylist", () => {
     expect(matchesDenylist("shutdown -h now")).toBe("shutdown");
   });
 
-  test("blocks fork bomb", () => {
+  test("blocks fork bomb (standard)", () => {
     expect(matchesDenylist(":(){:|:&};:")).toBe("fork bomb");
+  });
+
+  test("blocks fork bomb (spaced variant)", () => {
+    expect(matchesDenylist(":(){ :|:& };:")).toBe("fork bomb");
+  });
+
+  test("blocks fork bomb (compact no-paren variant)", () => {
+    expect(matchesDenylist(":{:|:&};:")).toBe("fork bomb");
+  });
+
+  test("blocks fork bomb (extra whitespace)", () => {
+    expect(matchesDenylist(":()  {  : | : &  } ; :")).toBe("fork bomb");
   });
 
   test("blocks chmod -R 777 /", () => {
