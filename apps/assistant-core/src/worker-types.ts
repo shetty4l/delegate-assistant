@@ -4,12 +4,12 @@ import type { ChatPort, ModelPort } from "@delegate/ports";
 
 export type SessionStoreLike = {
   getSession(sessionKey: string): Promise<{
-    opencodeSessionId: string;
+    sessionId: string;
     lastUsedAt: string;
   } | null>;
   upsertSession(mapping: {
     sessionKey: string;
-    opencodeSessionId: string;
+    sessionId: string;
     lastUsedAt: string;
     status: "active" | "stale";
   }): Promise<void>;

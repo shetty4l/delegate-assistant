@@ -1,0 +1,148 @@
+---
+import AppLayout from "../layouts/AppLayout.astro";
+
+type VersionPayload = {
+  ok: boolean;
+  service: string;
+  version: string;
+  displayVersion: string;
+  gitSha: string;
+  gitShortSha: string;
+  gitBranch: string;
+  commitTitle: string;
+  buildTimeUtc: string;
+  runtime: {
+    bunVersion: string;
+    nodeCompat: string;
+  };
+};
+
+const assistantUrl =
+  (process.env.ASSISTANT_CORE_URL?.trim() || "http://127.0.0.1:3000") +
+  "/version";
+
+let data: VersionPayload | null = null;
+let fetchError: string | null = null;
+
+try {
+  const res = await fetch(assistantUrl, { signal: AbortSignal.timeout(3_000) });
+  if (!res.ok) {
+    fetchError = `HTTP ${res.status}`;
+  } else {
+    data = (await res.json()) as VersionPayload;
+  }
+} catch (err) {
+  fetchError = err instanceof Error ? err.message : String(err);
+}
+
+const formatBuildTime = (iso: string): string => {
+  try {
+    return (
+      new Date(iso).toLocaleString("en-US", {
+        dateStyle: "medium",
+        timeStyle: "short",
+        timeZone: "UTC",
+      }) + " UTC"
+    );
+  } catch {
+    return iso;
+  }
+};
+---
+
+<AppLayout title="Version">
+  <style>
+    .grid {
+      display: grid;
+      gap: 12px;
+    }
+
+    .row {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--panel);
+      padding: 12px;
+    }
+
+    .label {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin-bottom: 5px;
+      font-weight: 700;
+    }
+
+    .value {
+      font-family: "SF Mono", Menlo, monospace;
+      font-size: 13px;
+      word-break: break-word;
+    }
+
+    .error {
+      padding: 16px;
+      border: 1px solid var(--warn);
+      border-radius: 12px;
+      background: #faeee3;
+      color: var(--warn);
+      font-size: 14px;
+    }
+
+    .section-title {
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--muted);
+      margin-top: 8px;
+      margin-bottom: 4px;
+    }
+  </style>
+
+  {fetchError && (
+    <div class="error">
+      Unable to reach assistant-core at <code>{assistantUrl}</code>: {fetchError}
+    </div>
+  )}
+
+  {data && (
+    <div class="grid">
+      <div class="row">
+        <div class="label">Service</div>
+        <div class="value">{data.service}</div>
+      </div>
+      <div class="row">
+        <div class="label">Version</div>
+        <div class="value">{data.displayVersion}</div>
+      </div>
+
+      <div class="section-title">Git</div>
+      <div class="row">
+        <div class="label">Branch</div>
+        <div class="value">{data.gitBranch}</div>
+      </div>
+      <div class="row">
+        <div class="label">Commit</div>
+        <div class="value">{data.gitShortSha} &mdash; {data.commitTitle}</div>
+      </div>
+      <div class="row">
+        <div class="label">Full SHA</div>
+        <div class="value">{data.gitSha}</div>
+      </div>
+
+      <div class="section-title">Build</div>
+      <div class="row">
+        <div class="label">Build Time</div>
+        <div class="value">{formatBuildTime(data.buildTimeUtc)}</div>
+      </div>
+      <div class="row">
+        <div class="label">Bun Version</div>
+        <div class="value">{data.runtime.bunVersion}</div>
+      </div>
+      <div class="row">
+        <div class="label">Node Compat</div>
+        <div class="value">{data.runtime.nodeCompat}</div>
+      </div>
+    </div>
+  )}
+</AppLayout>

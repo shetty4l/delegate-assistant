@@ -64,7 +64,7 @@ class ScriptedModel implements ModelPort {
 class MemorySessionStore implements SessionStoreLike {
   private readonly sessions = new Map<
     string,
-    { opencodeSessionId: string; lastUsedAt: string }
+    { sessionId: string; lastUsedAt: string }
   >();
   readonly staleMarks: string[] = [];
   readonly topicWorkspace = new Map<string, string>();
@@ -83,12 +83,12 @@ class MemorySessionStore implements SessionStoreLike {
 
   async upsertSession(mapping: {
     sessionKey: string;
-    opencodeSessionId: string;
+    sessionId: string;
     lastUsedAt: string;
     status: "active" | "stale";
   }) {
     this.sessions.set(mapping.sessionKey, {
-      opencodeSessionId: mapping.opencodeSessionId,
+      sessionId: mapping.sessionId,
       lastUsedAt: mapping.lastUsedAt,
     });
   }
@@ -183,7 +183,7 @@ const scopedSessionKey = (
   _workspacePath = defaultWorkspace,
 ): string => `${chatId}:${threadId ?? "root"}`;
 
-describe("telegram opencode relay", () => {
+describe("telegram model relay", () => {
   test("handles /start only as first message", async () => {
     const ctx = new WorkerContext();
     const chatPort = new CapturingChatPort();
@@ -231,7 +231,7 @@ describe("telegram opencode relay", () => {
     const persisted = await store.getSession(
       scopedSessionKey("chat-1", "42", defaultWorkspace),
     );
-    expect(persisted?.opencodeSessionId).toBe("ses-123");
+    expect(persisted?.sessionId).toBe("ses-123");
   });
 
   test("retries once with fresh session when resumed session fails", async () => {
@@ -240,7 +240,7 @@ describe("telegram opencode relay", () => {
     const store = new MemorySessionStore();
     await store.upsertSession({
       sessionKey: scopedSessionKey("chat-1", null, defaultWorkspace),
-      opencodeSessionId: "ses-old",
+      sessionId: "ses-old",
       lastUsedAt: new Date().toISOString(),
       status: "active",
     });
@@ -271,7 +271,7 @@ describe("telegram opencode relay", () => {
     const persisted = await store.getSession(
       scopedSessionKey("chat-1", null, defaultWorkspace),
     );
-    expect(persisted?.opencodeSessionId).toBe("ses-new");
+    expect(persisted?.sessionId).toBe("ses-new");
     expect(store.staleMarks).toContain(
       scopedSessionKey("chat-1", null, defaultWorkspace),
     );
@@ -287,7 +287,7 @@ describe("telegram opencode relay", () => {
         null,
         defaultWorkspace,
       ),
-      opencodeSessionId: "ses-hung",
+      sessionId: "ses-hung",
       lastUsedAt: new Date().toISOString(),
       status: "active",
     });

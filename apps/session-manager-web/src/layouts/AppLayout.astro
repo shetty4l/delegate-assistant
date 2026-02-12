@@ -86,6 +86,13 @@ const { title } = Astro.props;
         text-decoration: underline;
       }
 
+      nav {
+        display: flex;
+        gap: 16px;
+        font-size: 14px;
+        font-weight: 600;
+      }
+
       @media (max-width: 760px) {
         .shell {
           width: 96vw;
@@ -105,8 +112,12 @@ const { title } = Astro.props;
       <header class="topbar">
         <div class="brand">
           Session Manager
-          <small>Tailnet admin surface for OpenCode session mappings</small>
+          <small>Delegate Assistant admin dashboard</small>
         </div>
+        <nav>
+          <a href="/sessions">Sessions</a>
+          <a href="/version">Version</a>
+        </nav>
       </header>
       <section class="content">
         <slot />

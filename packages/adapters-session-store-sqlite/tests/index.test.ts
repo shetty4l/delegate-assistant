@@ -29,21 +29,21 @@ describe("SqliteSessionStore admin queries", () => {
     try {
       await store.upsertSession({
         sessionKey: JSON.stringify(["chat-a:root", "/repo/a"]),
-        opencodeSessionId: "ses-a",
+        sessionId: "ses-a",
         status: "active",
         lastUsedAt: "2026-02-08T01:00:00.000Z",
       });
       await store.upsertSession({
         sessionKey: JSON.stringify(["chat-b:42", "/repo/b"]),
-        opencodeSessionId: "ses-b",
+        sessionId: "ses-b",
         status: "stale",
         lastUsedAt: "2026-02-08T02:00:00.000Z",
       });
 
       const all = await store.listSessions({ page: 1, pageSize: 25 });
       expect(all.total).toBe(2);
-      expect(all.items[0]?.opencodeSessionId).toBe("ses-b");
-      expect(all.items[1]?.opencodeSessionId).toBe("ses-a");
+      expect(all.items[0]?.sessionId).toBe("ses-b");
+      expect(all.items[1]?.sessionId).toBe("ses-a");
 
       const activeOnly = await store.listSessions({ status: "active" });
       expect(activeOnly.total).toBe(1);
@@ -51,7 +51,7 @@ describe("SqliteSessionStore admin queries", () => {
 
       const searched = await store.listSessions({ q: "/repo/b" });
       expect(searched.total).toBe(1);
-      expect(searched.items[0]?.opencodeSessionId).toBe("ses-b");
+      expect(searched.items[0]?.sessionId).toBe("ses-b");
     } finally {
       await cleanup();
     }
@@ -64,7 +64,7 @@ describe("SqliteSessionStore admin queries", () => {
       const sessionKey = JSON.stringify(["chat-c:root", "/repo/c"]);
       await store.upsertSession({
         sessionKey,
-        opencodeSessionId: "ses-c",
+        sessionId: "ses-c",
         status: "active",
         lastUsedAt: "2026-02-08T03:00:00.000Z",
       });

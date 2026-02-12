@@ -9,14 +9,9 @@ export type AppConfig = {
   sqlitePath: string;
   telegramBotToken: string | null;
   telegramPollIntervalMs: number;
-  modelProvider: "stub" | "opencode_cli" | "pi_agent";
-  opencodeBin: string;
+  modelProvider: "stub" | "pi_agent";
   modelName: string;
   assistantRepoPath: string;
-  opencodeAttachUrl: string;
-  opencodeAutoStart: boolean;
-  opencodeServeHost: string;
-  opencodeServePort: number;
   sessionIdleTimeoutMs: number;
   sessionMaxConcurrent: number;
   sessionRetryAttempts: number;
@@ -44,14 +39,9 @@ type RawConfigFile = {
   sqlitePath?: string;
   telegramBotToken?: string | null;
   telegramPollIntervalMs?: number;
-  modelProvider?: "stub" | "opencode_cli" | "pi_agent";
-  opencodeBin?: string;
+  modelProvider?: "stub" | "pi_agent";
   modelName?: string;
   assistantRepoPath?: string;
-  opencodeAttachUrl?: string;
-  opencodeAutoStart?: boolean;
-  opencodeServeHost?: string;
-  opencodeServePort?: number;
   sessionIdleTimeoutMs?: number;
   sessionMaxConcurrent?: number;
   sessionRetryAttempts?: number;
@@ -145,14 +135,12 @@ const asOptionalNumber = (value: unknown): number | undefined => {
   return undefined;
 };
 
-const asModelProvider = (
-  value: unknown,
-): "stub" | "opencode_cli" | "pi_agent" => {
-  if (value === "stub" || value === "opencode_cli" || value === "pi_agent") {
+const asModelProvider = (value: unknown): "stub" | "pi_agent" => {
+  if (value === "stub" || value === "pi_agent") {
     return value;
   }
   throw new Error(
-    `Model provider must be one of: stub, opencode_cli, pi_agent (received "${String(value)}")`,
+    `Model provider must be one of: stub, pi_agent (received "${String(value)}")`,
   );
 };
 
@@ -175,13 +163,8 @@ export const loadConfig = (): AppConfig => {
     "TELEGRAM_BOT_TOKEN",
     "TELEGRAM_POLL_INTERVAL_MS",
     "MODEL_PROVIDER",
-    "OPENCODE_BIN",
     "MODEL_NAME",
     "ASSISTANT_REPO_PATH",
-    "OPENCODE_ATTACH_URL",
-    "OPENCODE_AUTO_START",
-    "OPENCODE_SERVE_HOST",
-    "OPENCODE_SERVE_PORT",
     "SESSION_IDLE_TIMEOUT_MS",
     "SESSION_MAX_CONCURRENT",
     "SESSION_RETRY_ATTEMPTS",
@@ -214,23 +197,6 @@ export const loadConfig = (): AppConfig => {
   );
   const modelProvider = asModelProvider(
     process.env.MODEL_PROVIDER ?? fileConfig.modelProvider ?? "stub",
-  );
-  const opencodeAttachUrl =
-    process.env.OPENCODE_ATTACH_URL?.trim() ||
-    asOptionalString(fileConfig.opencodeAttachUrl) ||
-    "http://127.0.0.1:4096";
-  const opencodeAutoStart =
-    process.env.OPENCODE_AUTO_START?.trim() === "true" ||
-    asOptionalBoolean(fileConfig.opencodeAutoStart) ||
-    true;
-  const opencodeServeHost =
-    process.env.OPENCODE_SERVE_HOST?.trim() ||
-    asOptionalString(fileConfig.opencodeServeHost) ||
-    "127.0.0.1";
-  const opencodeServePort = Number(
-    process.env.OPENCODE_SERVE_PORT ??
-      asOptionalNumber(fileConfig.opencodeServePort) ??
-      "4096",
   );
   const sessionIdleTimeoutMs = Number(
     process.env.SESSION_IDLE_TIMEOUT_MS ??
@@ -277,10 +243,6 @@ export const loadConfig = (): AppConfig => {
       asOptionalString(fileConfig.sqlitePath) ??
       defaultSqlitePath,
   );
-  const opencodeBin =
-    process.env.OPENCODE_BIN?.trim() ||
-    asOptionalString(fileConfig.opencodeBin) ||
-    "opencode";
   const modelName =
     process.env.MODEL_NAME?.trim() ||
     asOptionalString(fileConfig.modelName) ||
@@ -351,7 +313,6 @@ export const loadConfig = (): AppConfig => {
   }
   asPositiveInt(port, "port");
   asPositiveInt(telegramPollIntervalMs, "telegramPollIntervalMs");
-  asPositiveInt(opencodeServePort, "opencodeServePort");
   asPositiveInt(sessionIdleTimeoutMs, "sessionIdleTimeoutMs");
   asPositiveInt(sessionMaxConcurrent, "sessionMaxConcurrent");
   asPositiveInt(sessionRetryAttempts, "sessionRetryAttempts");
@@ -405,13 +366,8 @@ export const loadConfig = (): AppConfig => {
     telegramBotToken,
     telegramPollIntervalMs,
     modelProvider,
-    opencodeBin,
     modelName,
     assistantRepoPath,
-    opencodeAttachUrl,
-    opencodeAutoStart,
-    opencodeServeHost,
-    opencodeServePort,
     sessionIdleTimeoutMs,
     sessionMaxConcurrent,
     sessionRetryAttempts,
