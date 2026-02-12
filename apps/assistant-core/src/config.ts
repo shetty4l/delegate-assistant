@@ -260,7 +260,7 @@ export const loadConfig = (): AppConfig => {
   const piAgentModel =
     process.env.PI_AGENT_MODEL?.trim() ||
     asOptionalString(fileConfig.piAgentModel) ||
-    "llama-3.3-70b-versatile";
+    "qwen/qwen3-32b";
   const piAgentApiKey =
     process.env.PI_AGENT_API_KEY?.trim() ||
     asOptionalNullableString(fileConfig.piAgentApiKey) ||

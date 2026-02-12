@@ -199,13 +199,13 @@ describe("pi_agent default values", () => {
     expect(config.piAgentProvider).toBe("groq");
   });
 
-  test("defaults piAgentModel to llama-3.3-70b-versatile", () => {
+  test("defaults piAgentModel to qwen/qwen3-32b", () => {
     envSnap = saveEnv();
     writeConfig(minimalConfig());
     process.env.PI_AGENT_API_KEY = "sk-test";
 
     const config = loadConfig();
-    expect(config.piAgentModel).toBe("llama-3.3-70b-versatile");
+    expect(config.piAgentModel).toBe("qwen/qwen3-32b");
   });
 
   test("config file overrides defaults", () => {
