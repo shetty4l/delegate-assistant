@@ -17,6 +17,8 @@ export type ModelTurnResponse = {
   sessionId?: string;
   mode?: "chat_reply" | "execution_proposal";
   confidence?: number;
+  /** Which model tier handled the request (e.g. "t1", "t2"). */
+  tier?: string;
   usage?: {
     inputTokens: number;
     outputTokens: number;

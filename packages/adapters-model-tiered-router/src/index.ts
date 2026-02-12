@@ -37,6 +37,10 @@ const logWarn = (event: string, fields: Record<string, unknown>): void => {
   console.warn(JSON.stringify({ level: "warn", event, ...fields }));
 };
 
+/** Truncate a prompt for log output. */
+const promptPreview = (text: string, maxLen = 80): string =>
+  text.length <= maxLen ? text : `${text.slice(0, maxLen)}…`;
+
 /**
  * Tiered model router that implements ModelPort.
  *
@@ -70,10 +74,13 @@ export class TieredRouterAdapter implements ModelPort {
   }
 
   async respond(input: RespondInput): Promise<ModelTurnResponse> {
+    const respondStart = performance.now();
     const sessionKey =
       input.sessionId ?? `${input.chatId}:${input.threadId ?? "root"}`;
+    const preview = promptPreview(input.text);
 
     // Step 1: Recall memories from Engram (fire-and-forget on failure)
+    const engramStart = performance.now();
     const { engram } = this.config;
     const memories = await engramRecall({
       url: engram.url,
@@ -81,11 +88,13 @@ export class TieredRouterAdapter implements ModelPort {
       maxMemories: engram.maxMemories,
       minStrength: engram.minStrength,
     });
+    const engramMs = Math.round(performance.now() - engramStart);
 
     if (memories.count > 0) {
       log("tiered_router.engram.recalled", {
         sessionKey,
         count: memories.count,
+        engramMs,
         fallbackMode: memories.fallbackMode,
       });
     }
@@ -96,10 +105,16 @@ export class TieredRouterAdapter implements ModelPort {
     const classifierAvailable = await this.isClassifierHealthy();
 
     if (!classifierAvailable) {
-      return this.handleT2(input, sessionKey, "classifier_unhealthy");
+      return this.finalize(
+        await this.handleT2(input, sessionKey, "classifier_unhealthy"),
+        sessionKey,
+        preview,
+        respondStart,
+      );
     }
 
     // Step 3: Classify the request (with memory context for T0)
+    const classifyStart = performance.now();
     let classification: ClassificationResult;
     try {
       classification = await classify(
@@ -107,6 +122,7 @@ export class TieredRouterAdapter implements ModelPort {
         input.text,
         memoryContext,
       );
+      const classifyMs = Math.round(performance.now() - classifyStart);
 
       log("tiered_router.classify.complete", {
         sessionKey,
@@ -114,6 +130,7 @@ export class TieredRouterAdapter implements ModelPort {
         confidence: classification.confidence,
         reason: classification.reason,
         category: classification.category,
+        classifyMs,
       });
     } catch (error) {
       this.classifierHealth = {
@@ -128,12 +145,22 @@ export class TieredRouterAdapter implements ModelPort {
         fallback: "t2",
       });
 
-      return this.handleT2(input, sessionKey, "classifier_error");
+      return this.finalize(
+        await this.handleT2(input, sessionKey, "classifier_error"),
+        sessionKey,
+        preview,
+        respondStart,
+      );
     }
 
     // Step 4: Route based on classification
     if (classification.tier === "t2") {
-      return this.handleT2(input, sessionKey, "classified_t2");
+      return this.finalize(
+        await this.handleT2(input, sessionKey, "classified_t2"),
+        sessionKey,
+        preview,
+        respondStart,
+      );
     }
 
     if (
@@ -145,26 +172,37 @@ export class TieredRouterAdapter implements ModelPort {
         threshold: this.config.classifier.confidenceThreshold,
         fallback: "t2",
       });
-      return this.handleT2(input, sessionKey, "low_confidence");
+      return this.finalize(
+        await this.handleT2(input, sessionKey, "low_confidence"),
+        sessionKey,
+        preview,
+        respondStart,
+      );
     }
 
     // Step 5: Classified as T1 — check T1 health and attempt local inference
     const t1Available = await this.isT1Healthy();
 
     if (!t1Available) {
-      return this.handleT2(input, sessionKey, "t1_unhealthy");
+      return this.finalize(
+        await this.handleT2(input, sessionKey, "t1_unhealthy"),
+        sessionKey,
+        preview,
+        respondStart,
+      );
     }
 
     const abortController = new AbortController();
     this.activeRequests.set(sessionKey, abortController);
 
     try {
-      return await this.handleT1(
+      const response = await this.handleT1(
         input,
         sessionKey,
         abortController.signal,
         memoryContext,
       );
+      return this.finalize(response, sessionKey, preview, respondStart);
     } catch (error) {
       if (abortController.signal.aborted) {
         throw error;
@@ -182,10 +220,32 @@ export class TieredRouterAdapter implements ModelPort {
         fallback: "t2",
       });
 
-      return this.handleT2(input, sessionKey, "t1_error");
+      return this.finalize(
+        await this.handleT2(input, sessionKey, "t1_error"),
+        sessionKey,
+        preview,
+        respondStart,
+      );
     } finally {
       this.activeRequests.delete(sessionKey);
     }
+  }
+
+  /** Log the end-to-end routing summary. */
+  private finalize(
+    response: ModelTurnResponse,
+    sessionKey: string,
+    preview: string,
+    respondStart: number,
+  ): ModelTurnResponse {
+    const totalMs = Math.round(performance.now() - respondStart);
+    log("tiered_router.respond.complete", {
+      sessionKey,
+      tier: response.tier,
+      totalMs,
+      prompt: preview,
+    });
+    return response;
   }
 
   async ping(): Promise<void> {
@@ -337,6 +397,7 @@ export class TieredRouterAdapter implements ModelPort {
       sessionId: sessionKey,
       mode: "chat_reply",
       confidence: 1,
+      tier: "t1",
       usage: {
         inputTokens: result.tokensIn,
         outputTokens: result.tokensOut,
@@ -368,7 +429,7 @@ export class TieredRouterAdapter implements ModelPort {
         cost: response.usage?.cost,
       });
 
-      return response;
+      return { ...response, tier: "t2" };
     } finally {
       this.t2ActiveSessions.delete(sessionKey);
     }

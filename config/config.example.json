@@ -18,5 +18,25 @@
   "progressEveryMs": 30000,
   "progressMaxCount": 3,
   "startupAnnounceChatId": null,
-  "startupAnnounceThreadId": null
+  "startupAnnounceThreadId": null,
+
+  "_comment_tieredRouter": "Set modelProvider to 'tiered_router' and configure the block below to enable tiered routing. T2 backend reuses piAgentProvider/piAgentModel above.",
+  "tieredRouter": {
+    "classifier": {
+      "ollamaUrl": "http://127.0.0.1:11434",
+      "model": "qwen2.5:3b",
+      "numCtx": 4096,
+      "confidenceThreshold": 0.7
+    },
+    "t1": {
+      "ollamaUrl": "http://192.168.1.131:11434",
+      "model": "qwen2.5:14b-instruct-q4_K_M",
+      "numCtx": 16384
+    },
+    "engram": {
+      "url": "http://127.0.0.1:7749",
+      "maxMemories": 3,
+      "minStrength": 0.3
+    }
+  }
 }
