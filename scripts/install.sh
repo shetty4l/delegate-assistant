@@ -154,12 +154,12 @@ provider_env_var() {
 provider_default_model() {
   case "$1" in
     openrouter) echo "openrouter/auto" ;;
-    groq)       echo "llama-3.3-70b-versatile" ;;
+    groq)       echo "qwen/qwen3-32b" ;;
     google)     echo "gemini-2.5-flash" ;;
     openai)     echo "gpt-4o-mini" ;;
     anthropic)  echo "claude-sonnet-4-20250514" ;;
     cerebras)   echo "llama-3.3-70b" ;;
-    *)          echo "llama-3.3-70b-versatile" ;;
+    *)          echo "qwen/qwen3-32b" ;;
   esac
 }
 
