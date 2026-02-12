@@ -3,6 +3,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TurnEvent } from "@delegate/domain";
+import { ModelError } from "@delegate/domain";
 import type { RespondInput, TurnEventSink } from "@delegate/ports";
 import { Agent } from "@mariozechner/pi-agent-core";
 import { PiAgentModelAdapter } from "../src/index";
@@ -353,6 +354,251 @@ describe("PiAgentModelAdapter", () => {
         expect(stepComplete).toBeDefined();
         expect(stepComplete!.data.stepCount).toBe(1);
         expect(stepComplete!.data.cost).toBe(0.01);
+      } finally {
+        Agent.prototype.prompt = originalPrompt;
+        Agent.prototype.subscribe = originalSubscribe;
+      }
+    });
+  });
+
+  describe("LLM error detection (silent errors from pi-agent-core)", () => {
+    test("throws ModelError when agent.state.error is set", async () => {
+      const originalPrompt = Agent.prototype.prompt;
+      Agent.prototype.prompt = mock(async function (this: Agent) {
+        (this.state as any).error = "Insufficient credits";
+        (this.state as any).messages = [
+          {
+            role: "assistant",
+            content: [{ type: "text", text: "" }],
+            stopReason: "error",
+            errorMessage: "Insufficient credits",
+          },
+        ];
+      }) as any;
+
+      try {
+        const adapter = makeAdapter();
+        let caught: Error | undefined;
+        try {
+          await adapter.respond(makeInput());
+        } catch (err) {
+          caught = err as Error;
+        }
+
+        expect(caught).toBeInstanceOf(ModelError);
+        const modelErr = caught as ModelError;
+        expect(modelErr.classification).toBe("billing");
+        expect(modelErr.upstream).toContain("Insufficient credits");
+      } finally {
+        Agent.prototype.prompt = originalPrompt;
+      }
+    });
+
+    test("throws ModelError when stopReason is error even without state.error", async () => {
+      const originalPrompt = Agent.prototype.prompt;
+      Agent.prototype.prompt = mock(async function (this: Agent) {
+        (this.state as any).messages = [
+          {
+            role: "assistant",
+            content: [{ type: "text", text: "" }],
+            stopReason: "error",
+            errorMessage: "401 Unauthorized",
+          },
+        ];
+      }) as any;
+
+      try {
+        const adapter = makeAdapter();
+        let caught: Error | undefined;
+        try {
+          await adapter.respond(makeInput());
+        } catch (err) {
+          caught = err as Error;
+        }
+
+        expect(caught).toBeInstanceOf(ModelError);
+        expect((caught as ModelError).classification).toBe("auth");
+      } finally {
+        Agent.prototype.prompt = originalPrompt;
+      }
+    });
+
+    test("emits turn_failed with classification on LLM error", async () => {
+      const originalPrompt = Agent.prototype.prompt;
+      Agent.prototype.prompt = mock(async function (this: Agent) {
+        (this.state as any).error = "rate limit exceeded";
+        (this.state as any).messages = [
+          {
+            role: "assistant",
+            content: [],
+            stopReason: "error",
+            errorMessage: "rate limit exceeded",
+          },
+        ];
+      }) as any;
+
+      try {
+        const events: TurnEvent[] = [];
+        const sink: TurnEventSink = {
+          emit: async (event: TurnEvent) => {
+            events.push(event);
+          },
+        };
+        const adapter = makeAdapter({ turnEventSink: sink });
+
+        await expect(adapter.respond(makeInput())).rejects.toThrow(ModelError);
+        await new Promise((r) => setTimeout(r, 10));
+
+        const failed = events.find((e) => e.eventType === "turn_failed");
+        expect(failed).toBeDefined();
+        expect(failed!.data.classification).toBe("rate_limit");
+      } finally {
+        Agent.prototype.prompt = originalPrompt;
+      }
+    });
+  });
+
+  describe("max-steps partial text", () => {
+    test("returns partial text with truncation note on max-steps abort", async () => {
+      const originalPrompt = Agent.prototype.prompt;
+      const originalSubscribe = Agent.prototype.subscribe;
+
+      let subscriber: ((event: any) => void) | null = null;
+      Agent.prototype.subscribe = mock(function (
+        this: Agent,
+        fn: (event: any) => void,
+      ) {
+        subscriber = fn;
+        return () => {
+          subscriber = null;
+        };
+      }) as any;
+
+      Agent.prototype.prompt = mock(async function (this: Agent) {
+        // Simulate a single step that triggers max-steps
+        if (subscriber) {
+          subscriber({
+            type: "turn_end",
+            message: {
+              role: "assistant",
+              content: [{ type: "text", text: "partial answer" }],
+              usage: { input: 100, output: 50, cost: { total: 0.01 } },
+            },
+            toolResults: [],
+          });
+        }
+        (this.state as any).messages = [
+          {
+            role: "assistant",
+            content: [{ type: "text", text: "partial answer" }],
+          },
+        ];
+      }) as any;
+
+      try {
+        const adapter = makeAdapter({ maxSteps: 1 }); // triggers after 1 step
+        const result = await adapter.respond(makeInput());
+
+        expect(result.replyText).toContain("partial answer");
+        expect(result.replyText).toContain("Reached max steps");
+      } finally {
+        Agent.prototype.prompt = originalPrompt;
+        Agent.prototype.subscribe = originalSubscribe;
+      }
+    });
+  });
+
+  describe("abort()", () => {
+    test("calls agent.abort() for an active session", async () => {
+      const originalPrompt = Agent.prototype.prompt;
+      const originalAbort = Agent.prototype.abort;
+      let abortCalled = false;
+
+      Agent.prototype.prompt = mock(async function (this: Agent) {
+        (this.state as any).messages = [
+          { role: "assistant", content: [{ type: "text", text: "ok" }] },
+        ];
+      }) as any;
+      Agent.prototype.abort = mock(function () {
+        abortCalled = true;
+      }) as any;
+
+      try {
+        const adapter = makeAdapter();
+        await adapter.respond(makeInput({ chatId: "c1", threadId: undefined }));
+
+        adapter.abort("c1:root");
+        expect(abortCalled).toBe(true);
+      } finally {
+        Agent.prototype.prompt = originalPrompt;
+        Agent.prototype.abort = originalAbort;
+      }
+    });
+
+    test("is a no-op for unknown session keys", () => {
+      const adapter = makeAdapter();
+      // Should not throw
+      adapter.abort("nonexistent-session");
+    });
+  });
+
+  describe("step_error emission", () => {
+    test("emits step_error when turn_end has stopReason error", async () => {
+      const originalPrompt = Agent.prototype.prompt;
+      const originalSubscribe = Agent.prototype.subscribe;
+
+      let subscriber: ((event: any) => void) | null = null;
+      Agent.prototype.subscribe = mock(function (
+        this: Agent,
+        fn: (event: any) => void,
+      ) {
+        subscriber = fn;
+        return () => {
+          subscriber = null;
+        };
+      }) as any;
+
+      Agent.prototype.prompt = mock(async function (this: Agent) {
+        if (subscriber) {
+          subscriber({
+            type: "turn_end",
+            message: {
+              role: "assistant",
+              content: [],
+              stopReason: "error",
+              errorMessage: "Insufficient credits",
+              usage: { input: 10, output: 0, cost: { total: 0 } },
+            },
+            toolResults: [],
+          });
+        }
+        // Set state for the error detection path
+        (this.state as any).error = "Insufficient credits";
+        (this.state as any).messages = [
+          {
+            role: "assistant",
+            content: [],
+            stopReason: "error",
+            errorMessage: "Insufficient credits",
+          },
+        ];
+      }) as any;
+
+      try {
+        const events: TurnEvent[] = [];
+        const sink: TurnEventSink = {
+          emit: async (event: TurnEvent) => {
+            events.push(event);
+          },
+        };
+        const adapter = makeAdapter({ turnEventSink: sink });
+
+        await expect(adapter.respond(makeInput())).rejects.toThrow(ModelError);
+        await new Promise((r) => setTimeout(r, 10));
+
+        const stepError = events.find((e) => e.eventType === "step_error");
+        expect(stepError).toBeDefined();
+        expect(stepError!.data.errorMessage).toBe("Insufficient credits");
       } finally {
         Agent.prototype.prompt = originalPrompt;
         Agent.prototype.subscribe = originalSubscribe;

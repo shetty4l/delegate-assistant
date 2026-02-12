@@ -1,4 +1,5 @@
 import type { ModelTurnResponse } from "@delegate/domain";
+import { classifyModelError, ModelError } from "@delegate/domain";
 import type { ModelPort, RespondInput } from "@delegate/ports";
 import type { AgentEvent } from "@mariozechner/pi-agent-core";
 import { Agent } from "@mariozechner/pi-agent-core";
@@ -139,12 +140,21 @@ export class PiAgentModelAdapter implements ModelPort {
           timestamp: nowIso(),
           data,
         })
-        .catch(() => {
-          // fire-and-forget: swallow errors
+        .catch((err: unknown) => {
+          console.warn(
+            JSON.stringify({
+              level: "warn",
+              event: "turn_event_sink.emit_failed",
+              error: String(err),
+            }),
+          );
         });
     };
 
     emitEvent("turn_started", { inputText: input.text });
+
+    let abortedByMaxSteps = false;
+    let partialText = "";
 
     const unsubscribe = agent.subscribe((event: AgentEvent) => {
       if (event.type === "tool_execution_start") {
@@ -174,6 +184,27 @@ export class PiAgentModelAdapter implements ModelPort {
           totalCost += msg.usage.cost.total;
         }
 
+        // Accumulate partial text for max-steps degraded success
+        if (msg.role === "assistant" && msg.content) {
+          const stepText = msg.content
+            .filter(
+              (c): c is { type: "text"; text: string } => c.type === "text",
+            )
+            .map((c) => c.text)
+            .join("\n");
+          if (stepText) {
+            partialText = stepText;
+          }
+        }
+
+        // 2e: Detect step-level errors from the provider
+        if (msg.stopReason === "error") {
+          emitEvent("step_error", {
+            stepCount,
+            errorMessage: msg.errorMessage ?? "unknown error",
+          });
+        }
+
         emitEvent("step_complete", {
           stepCount,
           inputTokens: msg.usage?.input ?? 0,
@@ -183,6 +214,7 @@ export class PiAgentModelAdapter implements ModelPort {
 
         // Enforce max steps
         if (stepCount >= this.config.maxSteps) {
+          abortedByMaxSteps = true;
           agent.abort();
         }
       }
@@ -204,7 +236,10 @@ export class PiAgentModelAdapter implements ModelPort {
 
     unsubscribe();
 
-    // Extract final text from agent messages
+    // 2a: Detect LLM errors that pi-agent-core swallows silently
+    // The library catches API errors internally, creates a synthetic
+    // AssistantMessage with stopReason: "error" and errorMessage, and
+    // resolves prompt() normally without throwing.
     const messages = agent.state.messages;
     const lastAssistant = [...messages]
       .reverse()
@@ -213,6 +248,53 @@ export class PiAgentModelAdapter implements ModelPort {
           (m as AssistantMessage).role === "assistant",
       );
 
+    const errorSource =
+      agent.state.error ?? lastAssistant?.errorMessage ?? null;
+    const isErrorStop = lastAssistant?.stopReason === "error";
+
+    if (errorSource || isErrorStop) {
+      const rawMessage = String(errorSource || "unknown model error");
+      const classification = classifyModelError(rawMessage);
+      emitEvent("turn_failed", {
+        error: rawMessage,
+        classification,
+        totalInputTokens,
+        totalOutputTokens,
+        totalCost,
+        stepCount,
+      });
+      throw new ModelError(classification, rawMessage);
+    }
+
+    // 2b: Max-steps produces a degraded success, not an error
+    if (abortedByMaxSteps && partialText) {
+      const truncatedReply = `${partialText}\n\n---\n(Reached max steps; response may be incomplete)`;
+      emitEvent("turn_completed", {
+        replyText: truncatedReply,
+        truncated: true,
+        totalInputTokens,
+        totalOutputTokens,
+        totalCost,
+        stepCount,
+      });
+
+      const result: ModelTurnResponse = {
+        mode: "chat_reply",
+        confidence: 1,
+        replyText: truncatedReply,
+        sessionId: sessionKey,
+      };
+      if (hasUsage) {
+        result.usage = {
+          inputTokens: totalInputTokens,
+          outputTokens: totalOutputTokens,
+          cost: totalCost,
+        };
+      }
+      return result;
+    }
+
+    // Normal success path
     const replyText =
       lastAssistant?.content
         .filter((c): c is { type: "text"; text: string } => c.type === "text")
@@ -253,6 +335,14 @@ export class PiAgentModelAdapter implements ModelPort {
       throw new Error(`Pi Agent configuration error: ${String(err)}`, {
         cause: err,
       });
+    }
+  }
+
+  /** Abort a running agent session. Safe to call if no session is active. */
+  abort(sessionKey: string): void {
+    const cached = this.agents.get(sessionKey);
+    if (cached) {
+      cached.agent.abort();
     }
   }
 }

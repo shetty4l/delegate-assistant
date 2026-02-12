@@ -78,4 +78,6 @@ export type RelayErrorClass =
   | "session_invalid"
   | "timeout"
   | "empty_output"
-  | "transport";
+  | "transport"
+  | "model_error"
+  | "model_transient";

@@ -260,4 +260,21 @@ describe("TopicQueueMap", () => {
     expect(results).toContain("a");
     expect(results).toContain("b");
   });
+
+  test("getOrCreate passes onError callback to new queues", async () => {
+    const map = new TopicQueueMap();
+    const errors: unknown[] = [];
+
+    map
+      .getOrCreate("topic-err", (err) => {
+        errors.push(err);
+      })
+      .enqueue(async () => {
+        throw new Error("queue boom");
+      });
+
+    await map.drainAll();
+    expect(errors.length).toBe(1);
+    expect(String(errors[0])).toContain("queue boom");
+  });
 });

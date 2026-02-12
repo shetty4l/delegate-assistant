@@ -15,6 +15,7 @@ import type {
   ModelTurnResponse,
   OutboundMessage,
 } from "@delegate/domain";
+import { ModelError } from "@delegate/domain";
 import type {
   ChatPort,
   ChatUpdate,
@@ -624,5 +625,122 @@ describe("telegram model relay", () => {
     expect(seenInputs[1]?.sessionId).toBe("ses-a"); // Same session reused
 
     await rm(baseDir, { recursive: true, force: true });
+  });
+});
+
+describe("handleChatMessage error handling", () => {
+  test("sends model_error message to user on ModelError (billing)", async () => {
+    const chatPort = new CapturingChatPort();
+    const model = new ScriptedModel(async () => {
+      throw new ModelError("billing", "Insufficient credits");
+    });
+
+    const ctx = new WorkerContext();
+    const deps = { chatPort, modelPort: model };
+    const opts = { defaultWorkspacePath: process.cwd() };
+
+    await handleChatMessage(
+      ctx,
+      deps,
+      inbound("hello", undefined, "chat-billing"),
+      opts,
+    );
+
+    // Should have sent a user-facing error message, not silence
+    const messages = chatPort.sent.filter(
+      (m) => m.chatId === "chat-billing" && m.text.includes("⚠️"),
+    );
+    expect(messages.length).toBeGreaterThanOrEqual(1);
+    expect(messages[0]!.text).toContain("billing");
+    expect(messages[0]!.text).toContain("Insufficient credits");
+  });
+
+  test("retries once on model_transient error", async () => {
+    let callCount = 0;
+    const model = new ScriptedModel(async () => {
+      callCount += 1;
+      if (callCount === 1) {
+        throw new ModelError("rate_limit", "429 Too Many Requests");
+      }
+      return { replyText: "retried ok", sessionId: "s1" };
+    });
+
+    const chatPort = new CapturingChatPort();
+    const ctx = new WorkerContext();
+    const deps = { chatPort, modelPort: model };
+    const opts = { defaultWorkspacePath: process.cwd() };
+
+    await handleChatMessage(
+      ctx,
+      deps,
+      inbound("hello", undefined, "chat-transient"),
+      opts,
+    );
+
+    expect(callCount).toBe(2);
+    const successMsg = chatPort.sent.find(
+      (m) => m.chatId === "chat-transient" && m.text.includes("retried ok"),
+    );
+    expect(successMsg).toBeDefined();
+  });
+
+  test("sends fallback message on completely uncaught error", async () => {
+    const model = new ScriptedModel(async () => {
+      throw new Error("completely unexpected crash");
+    });
+
+    // Use a chat port that records, but also a model that
+    // throws a non-ModelError to trigger the outer catch
+    const chatPort = new CapturingChatPort();
+    const ctx = new WorkerContext();
+    const deps = { chatPort, modelPort: model };
+    const opts = {
+      defaultWorkspacePath: process.cwd(),
+      sessionRetryAttempts: 0,
+    };
+
+    await handleChatMessage(
+      ctx,
+      deps,
+      inbound("hello", undefined, "chat-uncaught"),
+      opts,
+    );
+
+    // Should have sent an error message, not silence
+    const errorMessages = chatPort.sent.filter(
+      (m) => m.chatId === "chat-uncaught",
+    );
+    expect(errorMessages.length).toBeGreaterThanOrEqual(1);
+  });
+
+  test("wires onTimeout to call abort on the model port", async () => {
+    let abortedKey: string | null = null;
+    const model = new ScriptedModel(async () => {
+      // Simulate a slow response that times out
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+      return { replyText: "too late" };
+    });
+    // Duck-type abort onto the model
+    (model as any).abort = (key: string) => {
+      abortedKey = key;
+    };
+
+    const chatPort = new CapturingChatPort();
+    const ctx = new WorkerContext();
+    const deps = { chatPort, modelPort: model };
+    const opts = {
+      defaultWorkspacePath: process.cwd(),
+      relayTimeoutMs: 20,
+      sessionRetryAttempts: 0,
+    };
+
+    await handleChatMessage(
+      ctx,
+      deps,
+      inbound("hello", undefined, "chat-abort-wire"),
+      opts,
+    );
+
+    expect(abortedKey).toBe("chat-abort-wire:root");
   });
 });

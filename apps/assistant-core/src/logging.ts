@@ -10,6 +10,16 @@ export const logInfo = (event: string, fields: LogFields = {}): void => {
   );
 };
 
+export const logWarn = (event: string, fields: LogFields = {}): void => {
+  console.error(
+    JSON.stringify({
+      level: "warn",
+      event,
+      ...fields,
+    }),
+  );
+};
+
 export const logError = (event: string, fields: LogFields = {}): void => {
   console.error(
     JSON.stringify({
