@@ -3,12 +3,12 @@
 Knowledge Index (Johnny Decimal)
 
 ## Current v0 Status
-- Telegram <-> OpenCode relay runtime: active
+- Telegram <-> pi-agent relay runtime: active
 - Topic-aware session continuity (`chatId:threadId`): active
 - Persistent session/cursor store: active
 - Topic workspace switching with per-workspace session continuity: active
 - Supervisor-managed graceful worker restart: active
-- OpenCode auto-start (`opencode serve`) + attach flow: active
+- pi-agent model adapter (via OpenRouter): active
 - Minimal ops surface (`/health`, `/ready`): active
 - CI quality gate is active: `bun run verify`
 
@@ -28,11 +28,9 @@ Knowledge Index (Johnny Decimal)
 - `apps/assistant-core/src/workspace.ts`
 - `apps/assistant-core/src/slash-commands.ts`
 - `apps/assistant-core/src/messaging.ts`
-- `apps/assistant-core/src/opencode-server.ts`
 - `apps/assistant-core/src/session-store.ts`
 - `packages/adapters-telegram/src/index.ts`
 - `packages/adapters-model-pi-agent/src/index.ts`
-- `packages/adapters-model-opencode-cli/src/index.ts`
 - `packages/domain/src/index.ts`
 - `packages/ports/src/index.ts`
 
@@ -48,7 +46,7 @@ Knowledge Index (Johnny Decimal)
 - `docs/10-19_product/10-v0-requirements.md` - v0 product requirements and scope boundaries
 
 ## 20-29 Architecture
-- `docs/20-29_architecture/20-v0-architecture.md` - v0 Telegram-topic to OpenCode session bridge architecture (hexagonal patterns, workspace aliases)
+- `docs/20-29_architecture/20-v0-architecture.md` - v0 Telegram-topic to pi-agent session bridge architecture (hexagonal patterns, workspace aliases)
 
 ## Package Structure Optimization
 - Cleaned up package structure from 10 to 6 active packages

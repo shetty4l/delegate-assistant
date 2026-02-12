@@ -3,7 +3,7 @@
 Status: active
 
 ## 1. Purpose
-Build a personal AI assistant that acts as a delegated operator, not an autonomous actor. Telegram is the user interface and OpenCode is the execution engine. The wrapper runtime should stay minimal while preserving auditability, continuity, and evolvability.
+Build a personal AI assistant that acts as a delegated operator, not an autonomous actor. Telegram is the user interface and pi-agent (via OpenRouter) is the execution engine. The wrapper runtime should stay minimal while preserving auditability, continuity, and evolvability.
 
 This document defines what the system must do, not how it is implemented.
 
@@ -18,7 +18,7 @@ This document defines what the system must do, not how it is implemented.
 ### 2.2 Approval-Gated Action
 - No irreversible or externally visible side effects occur without explicit user approval.
 - The assistant may draft, plan, stage, and propose actions freely.
-- Safety and approval behavior are owned primarily by OpenCode in the active runtime.
+- Safety and approval behavior are owned primarily by the model adapter (pi-agent) in the active runtime.
 
 ### 2.3 Clear Separation of Identity
 - The assistant has its own identity across services.

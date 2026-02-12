@@ -17,7 +17,6 @@
     "apps/assistant-core": {
       "name": "@delegate/assistant-core",
       "dependencies": {
-        "@delegate/adapters-model-opencode-cli": "workspace:*",
         "@delegate/adapters-model-pi-agent": "workspace:*",
         "@delegate/adapters-model-stub": "workspace:*",
         "@delegate/adapters-session-store-sqlite": "workspace:*",
@@ -34,13 +33,6 @@
         "@delegate/adapters-session-store-sqlite": "workspace:*",
         "astro": "^5.0.0",
         "typescript": "^5.9.3",
-      },
-    },
-    "packages/adapters-model-opencode-cli": {
-      "name": "@delegate/adapters-model-opencode-cli",
-      "dependencies": {
-        "@delegate/domain": "workspace:*",
-        "@delegate/ports": "workspace:*",
       },
     },
     "packages/adapters-model-pi-agent": {
@@ -200,8 +192,6 @@
     "@biomejs/cli-win32-x64": ["@biomejs/cli-win32-x64@2.3.14", "", { "os": "win32", "cpu": "x64" }, "sha512-oizCjdyQ3WJEswpb3Chdngeat56rIdSYK12JI3iI11Mt5T5EXcZ7WLuowzEaFPNJ3zmOQFliMN8QY1Pi+qsfdQ=="],
 
     "@capsizecss/unpack": ["@capsizecss/unpack@4.0.0", "", { "dependencies": { "fontkitten": "^1.0.0" } }, "sha512-VERIM64vtTP1C4mxQ5thVT9fK0apjPFobqybMtA1UdUujWka24ERHbRHFGmpbbhp73MhV+KSsHQH9C6uOTdEQA=="],
-
-    "@delegate/adapters-model-opencode-cli": ["@delegate/adapters-model-opencode-cli@workspace:packages/adapters-model-opencode-cli"],
 
     "@delegate/adapters-model-pi-agent": ["@delegate/adapters-model-pi-agent@workspace:packages/adapters-model-pi-agent"],
 

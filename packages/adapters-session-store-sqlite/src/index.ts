@@ -4,7 +4,7 @@ import { dirname } from "node:path";
 
 export type SessionMapping = {
   sessionKey: string;
-  opencodeSessionId: string;
+  sessionId: string;
   lastUsedAt: string;
   status: "active" | "stale";
 };
@@ -108,7 +108,7 @@ export const parseSessionKey = (sessionKey: string): SessionKeyParts | null => {
 
 const asSessionListItem = (row: {
   session_key: string;
-  opencode_session_id: string;
+  session_id: string;
   last_used_at: string;
   status: string;
   topic_key: string | null;
@@ -122,7 +122,7 @@ const asSessionListItem = (row: {
   return {
     id: encodeSessionKeyId(row.session_key),
     sessionKey: row.session_key,
-    opencodeSessionId: row.opencode_session_id,
+    sessionId: row.session_id,
     lastUsedAt: row.last_used_at,
     status: row.status === "active" ? "active" : "stale",
     topicKey,
@@ -143,7 +143,7 @@ export class SqliteSessionStore {
     db.exec(`
       CREATE TABLE IF NOT EXISTS session_mappings (
         session_key TEXT PRIMARY KEY,
-        opencode_session_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
         last_used_at TEXT NOT NULL,
         status TEXT NOT NULL
       );
@@ -189,14 +189,14 @@ export class SqliteSessionStore {
     const row = this.ensureDb()
       .query(
         `
-          SELECT session_key, opencode_session_id, last_used_at, status
+           SELECT session_key, session_id, last_used_at, status
           FROM session_mappings
           WHERE session_key = $session_key
         `,
       )
       .get({ session_key: sessionKey }) as {
       session_key: string;
-      opencode_session_id: string;
+      session_id: string;
       last_used_at: string;
       status: string;
     } | null;
@@ -207,7 +207,7 @@ export class SqliteSessionStore {
 
     return {
       sessionKey: row.session_key,
-      opencodeSessionId: row.opencode_session_id,
+      sessionId: row.session_id,
       lastUsedAt: row.last_used_at,
       status: row.status === "active" ? "active" : "stale",
     };
@@ -224,7 +224,7 @@ export class SqliteSessionStore {
         `
           SELECT
             session_key,
-            opencode_session_id,
+            session_id,
             last_used_at,
             status,
             json_extract(session_key, '$[0]') as topic_key,
@@ -235,7 +235,7 @@ export class SqliteSessionStore {
       )
       .get({ session_key: sessionKey }) as {
       session_key: string;
-      opencode_session_id: string;
+      session_id: string;
       last_used_at: string;
       status: string;
       topic_key: string | null;
@@ -281,7 +281,7 @@ export class SqliteSessionStore {
       whereParts.push(`
         (
           LOWER(session_key) LIKE $q
-          OR LOWER(opencode_session_id) LIKE $q
+          OR LOWER(session_id) LIKE $q
           OR LOWER(COALESCE(json_extract(session_key, '$[0]'), '')) LIKE $q
           OR LOWER(COALESCE(json_extract(session_key, '$[1]'), '')) LIKE $q
         )
@@ -297,7 +297,7 @@ export class SqliteSessionStore {
         `
           SELECT
             session_key,
-            opencode_session_id,
+            session_id,
             last_used_at,
             status,
             json_extract(session_key, '$[0]') as topic_key,
@@ -310,7 +310,7 @@ export class SqliteSessionStore {
       )
       .all(params) as Array<{
       session_key: string;
-      opencode_session_id: string;
+      session_id: string;
       last_used_at: string;
       status: string;
       topic_key: string | null;
@@ -339,17 +339,17 @@ export class SqliteSessionStore {
     this.ensureDb()
       .query(
         `
-          INSERT INTO session_mappings (session_key, opencode_session_id, last_used_at, status)
-          VALUES ($session_key, $opencode_session_id, $last_used_at, $status)
+          INSERT INTO session_mappings (session_key, session_id, last_used_at, status)
+          VALUES ($session_key, $session_id, $last_used_at, $status)
           ON CONFLICT(session_key) DO UPDATE SET
-            opencode_session_id = excluded.opencode_session_id,
+            session_id = excluded.session_id,
             last_used_at = excluded.last_used_at,
             status = excluded.status
         `,
       )
       .run({
         session_key: mapping.sessionKey,
-        opencode_session_id: mapping.opencodeSessionId,
+        session_id: mapping.sessionId,
         last_used_at: mapping.lastUsedAt,
         status: mapping.status,
       });

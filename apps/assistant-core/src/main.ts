@@ -1,9 +1,5 @@
 import { loadConfig } from "@assistant-core/src/config";
 import { startHttpServer } from "@assistant-core/src/http";
-import {
-  ensureOpencodeServer,
-  probeOpencodeReachability,
-} from "@assistant-core/src/opencode-server";
 import { SqliteSessionStore } from "@assistant-core/src/session-store";
 import { sleep } from "@assistant-core/src/timers";
 import {
@@ -11,7 +7,6 @@ import {
   loadBuildInfo,
 } from "@assistant-core/src/version";
 import { startTelegramWorker } from "@assistant-core/src/worker";
-import { OpencodeCliModelAdapter } from "@delegate/adapters-model-opencode-cli";
 import { PiAgentModelAdapter } from "@delegate/adapters-model-pi-agent";
 import { DeterministicModelStub } from "@delegate/adapters-model-stub";
 import { TelegramLongPollingAdapter } from "@delegate/adapters-telegram";
@@ -219,44 +214,24 @@ const runWorkerProcess = async (): Promise<number> => {
   const buildInfo = loadBuildInfo();
   const sessionStore = new SqliteSessionStore(config.sqlitePath);
   const modelPort =
-    config.modelProvider === "opencode_cli"
-      ? new OpencodeCliModelAdapter({
-          binaryPath: config.opencodeBin,
-          model: config.modelName,
-          repoPath: config.assistantRepoPath,
-          attachUrl: config.opencodeAttachUrl,
-          responseTimeoutMs: config.relayTimeoutMs,
+    config.modelProvider === "pi_agent"
+      ? new PiAgentModelAdapter({
+          provider: config.piAgentProvider,
+          model: config.piAgentModel,
+          apiKey: config.piAgentApiKey ?? undefined,
+          maxSteps: config.piAgentMaxSteps,
+          workspacePath: config.assistantRepoPath,
+          systemPromptPath: config.systemPromptPath ?? undefined,
+          gitIdentity: process.env.GIT_AUTHOR_NAME,
+          enableShellTool: config.piAgentEnableShellTool,
+          enableWebFetchTool: config.piAgentEnableWebFetchTool,
+          enableWebSearchTool: config.piAgentEnableWebSearchTool,
+          webFetchProvider: config.piAgentWebFetchProvider ?? undefined,
+          webFetchModel: config.piAgentWebFetchModel ?? undefined,
         })
-      : config.modelProvider === "pi_agent"
-        ? new PiAgentModelAdapter({
-            provider: config.piAgentProvider,
-            model: config.piAgentModel,
-            apiKey: config.piAgentApiKey ?? undefined,
-            maxSteps: config.piAgentMaxSteps,
-            workspacePath: config.assistantRepoPath,
-            systemPromptPath: config.systemPromptPath ?? undefined,
-            gitIdentity: process.env.GIT_AUTHOR_NAME,
-            enableShellTool: config.piAgentEnableShellTool,
-            enableWebFetchTool: config.piAgentEnableWebFetchTool,
-            enableWebSearchTool: config.piAgentEnableWebSearchTool,
-            webFetchProvider: config.piAgentWebFetchProvider ?? undefined,
-            webFetchModel: config.piAgentWebFetchModel ?? undefined,
-          })
-        : new DeterministicModelStub();
+      : new DeterministicModelStub();
 
   await sessionStore.init();
-
-  if (config.modelProvider === "opencode_cli" && config.opencodeAutoStart) {
-    await ensureOpencodeServer({
-      binaryPath: config.opencodeBin,
-      attachUrl: config.opencodeAttachUrl,
-      host: config.opencodeServeHost,
-      port: config.opencodeServePort,
-      workingDirectory: config.assistantRepoPath,
-      transportPing: async () =>
-        probeOpencodeReachability(config.opencodeAttachUrl),
-    });
-  }
 
   const server = await startWithPortTakeover({
     port: config.port,
@@ -341,8 +316,6 @@ const runWorkerProcess = async (): Promise<number> => {
     telegramWorkerEnabled: config.telegramBotToken !== null,
     modelProvider: config.modelProvider,
     assistantRepoPath: config.assistantRepoPath,
-    opencodeAttachUrl: config.opencodeAttachUrl,
-    opencodeAutoStart: config.opencodeAutoStart,
     version: buildInfo.releaseVersion,
     displayVersion: buildInfo.displayVersion,
     gitSha: buildInfo.gitSha,

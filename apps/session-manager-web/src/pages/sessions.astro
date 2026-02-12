@@ -177,7 +177,7 @@ const queryWithPage = (targetPage: number): string => {
         id="q"
         name="q"
         value={filters.q ?? ""}
-        placeholder="topic, workspace, OpenCode session id"
+        placeholder="topic, workspace, session id"
       />
     </div>
     <div class="field">
@@ -209,7 +209,7 @@ const queryWithPage = (targetPage: number): string => {
         <th>Status</th>
         <th>Topic</th>
         <th>Workspace</th>
-        <th>OpenCode Session</th>
+        <th>Session ID</th>
         <th>Last Used</th>
         <th>Details</th>
       </tr>
@@ -223,7 +223,7 @@ const queryWithPage = (targetPage: number): string => {
             </td>
             <td>{sessionTitle(item)}</td>
             <td class="mono">{item.workspacePath}</td>
-            <td class="mono">{item.opencodeSessionId}</td>
+            <td class="mono">{item.sessionId}</td>
             <td>{formatRelativeAge(item.lastUsedAt)}</td>
             <td>
               <a href={`/sessions/${item.id}`}>open</a>

@@ -1,5 +1,4 @@
 import type { AppConfig } from "@assistant-core/src/config";
-import { probeOpencodeReachability } from "@assistant-core/src/opencode-server";
 import type { BuildInfo } from "@assistant-core/src/version";
 import type { ModelPort } from "@delegate/ports";
 
@@ -67,44 +66,17 @@ export const startHttpServer = ({
   });
 };
 
-export const runReadinessChecks = async ({
-  config,
-  sessionStore,
-  modelPort,
-  opencodeProbe,
-}: {
+export const runReadinessChecks = async (deps: {
   config: AppConfig;
   sessionStore: { ping(): Promise<void> };
   modelPort: ModelPort;
-  opencodeProbe?: (attachUrl: string) => Promise<void>;
 }): Promise<{ ok: true } | { ok: false; reasons: string[] }> => {
   const reasons: string[] = [];
-  const probe = opencodeProbe ?? probeOpencodeReachability;
 
   try {
-    await sessionStore.ping();
+    await deps.sessionStore.ping();
   } catch {
     reasons.push("session_store_unreachable");
-  }
-
-  if (config.modelProvider === "opencode_cli") {
-    try {
-      await probe(config.opencodeAttachUrl);
-    } catch {
-      reasons.push("opencode_unreachable");
-    }
-
-    if (reasons.includes("opencode_unreachable")) {
-      return { ok: false, reasons };
-    }
-
-    if (modelPort.ping) {
-      try {
-        await modelPort.ping();
-      } catch {
-        reasons.push("opencode_model_unavailable");
-      }
-    }
   }
 
   if (reasons.length > 0) {

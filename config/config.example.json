@@ -17,12 +17,6 @@
   "progressFirstMs": 10000,
   "progressEveryMs": 30000,
   "progressMaxCount": 3,
-  "opencodeBin": "/Users/you/.opencode/bin/opencode",
-  "modelName": "openai/gpt-5.3-codex",
-  "opencodeAttachUrl": "http://127.0.0.1:4096",
-  "opencodeAutoStart": true,
-  "opencodeServeHost": "127.0.0.1",
-  "opencodeServePort": 4096,
   "startupAnnounceChatId": null,
   "startupAnnounceThreadId": null
 }

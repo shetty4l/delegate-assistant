@@ -10,7 +10,7 @@ The runtime is intentionally thin:
 ## Code Organization
 
 Clean hexagonal architecture with workspace aliases:
-- **7 active packages** in a Bun monorepo
+- **6 active packages** in a Bun monorepo
 - **Workspace aliases** for clean imports across modules
 - **Test separation** with `src/` (production) and `tests/` directories
 
@@ -28,7 +28,6 @@ Clean hexagonal architecture with workspace aliases:
 
 **Adapter Packages:**
 - `packages/adapters-model-pi-agent/` -- pi-agent LLM adapter (default)
-- `packages/adapters-model-opencode-cli/` -- OpenCode CLI adapter (legacy)
 - `packages/adapters-telegram/` -- Telegram long-polling adapter
 - `packages/adapters-session-store-sqlite/` -- SQLite session store
 

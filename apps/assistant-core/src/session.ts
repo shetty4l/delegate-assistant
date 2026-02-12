@@ -76,13 +76,8 @@ export const loadSessionId = async (
     return null;
   }
 
-  upsertSessionInMemory(
-    ctx,
-    sessionKey,
-    persisted.opencodeSessionId,
-    Date.now(),
-  );
-  return persisted.opencodeSessionId;
+  upsertSessionInMemory(ctx, sessionKey, persisted.sessionId, Date.now());
+  return persisted.sessionId;
 };
 
 export const persistSessionId = async (
@@ -100,7 +95,7 @@ export const persistSessionId = async (
 
   await deps.sessionStore.upsertSession({
     sessionKey,
-    opencodeSessionId: sessionId,
+    sessionId: sessionId,
     lastUsedAt: new Date(now).toISOString(),
     status: "active",
   });

@@ -1,4 +1,4 @@
-# Personal Assistant v0 Architecture (Telegram <-> OpenCode Bridge)
+# Personal Assistant v0 Architecture (Telegram <-> pi-agent Bridge)
 
 Status: active
 
@@ -6,7 +6,7 @@ Status: active
 
 The assistant runtime is intentionally thin:
 - Telegram is the transport surface.
-- OpenCode is the execution and safety engine.
+- pi-agent (via OpenRouter) is the execution and safety engine.
 - The wrapper owns routing, session continuity, and service health only.
 
 ## 2. Runtime Topology
@@ -14,7 +14,7 @@ The assistant runtime is intentionally thin:
 - Supervisor Bun process (`apps/assistant-core`) with one managed worker child
 - In-worker Telegram long poll loop
 - Local SQLite for session mapping and Telegram cursor persistence
-- Local OpenCode server (`opencode serve`) attached via HTTP
+- pi-agent model adapter for LLM execution via OpenRouter
 - Minimal HTTP endpoints for ops (`/health`, `/ready`)
 
 ## 3. Core Flow
@@ -22,12 +22,9 @@ The assistant runtime is intentionally thin:
 1. Telegram message arrives.
 2. Runtime computes `sessionKey = chatId + ":" + (threadId || "root")`.
 3. Runtime resolves active workspace for topic (default `assistantRepoPath`).
-4. Runtime loads persisted `opencodeSessionId` for `(topicKey, workspacePath)`.
-5. Runtime relays message to OpenCode using:
-   - `opencode run --attach <url> --format json`
-   - plus `--session <id>` when a prior session exists.
-   - process `cwd` set to active workspace path.
-6. Runtime parses OpenCode JSON events, captures returned `sessionID`, persists mapping.
+4. Runtime loads persisted `sessionId` for `(topicKey, workspacePath)`.
+5. Runtime relays message to pi-agent model adapter.
+6. Runtime captures returned `sessionId`, persists mapping.
 7. Runtime sends response back to the same chat/topic.
 
 ## 4. Session Continuity
@@ -36,7 +33,7 @@ Persistence contract:
 - `topicKey` (`chatId:threadId`)
 - `workspacePath`
 - `sessionKey` (`[topicKey, workspacePath]`)
-- `opencodeSessionId`
+- `sessionId`
 - `lastUsedAt`
 - `status` (`active|stale`)
 - Telegram polling cursor
@@ -62,14 +59,12 @@ Runtime behavior:
   - keep existing mapping
   - return a user-visible failure response
 
-## 5. OpenCode Lifecycle
+## 5. Model Adapter Lifecycle
 
-- Runtime probes OpenCode reachability via `modelPort.ping()`.
-- If `opencodeAutoStart=true` and probe fails:
-  - spawn `opencode serve --hostname <host> --port <port>`
-  - wait until probe succeeds or timeout
+- Runtime probes model adapter reachability via `modelPort.ping()`.
+- pi-agent adapter connects to OpenRouter; no local server management needed.
 
-This keeps local ops lightweight and self-healing.
+This keeps local ops lightweight.
 
 ## 6. Telegram Semantics
 
@@ -84,7 +79,7 @@ Deterministic wrapper intents (control plane):
 - `list repos` / `repos`: list known workspaces for this topic
 - `restart assistant` / `restart`: request graceful worker restart
 
-All other messages remain normal relay turns to OpenCode.
+All other messages remain normal relay turns to the model adapter.
 
 Restart behavior:
 - worker acknowledges restart intent to chat
@@ -94,7 +89,7 @@ Restart behavior:
 
 ## 7. Safety Ownership
 
-- OpenCode owns tool-execution safety, approvals, and operational guardrails.
+- The model adapter (pi-agent) owns tool-execution safety, approvals, and operational guardrails.
 - Wrapper does not implement a parallel policy/approval workflow in hot path.
 - Wrapper guardrails are transport-level only (timeouts, retries, routing integrity).
 
@@ -105,8 +100,8 @@ Restart behavior:
 
 `GET /ready`
 - Session store reachable.
-- OpenCode reachable.
-- Fails with `503` when OpenCode is unavailable.
+- Model adapter reachable.
+- Fails with `503` when model adapter is unavailable.
 
 ## 9. Ports and Adapters (Active)
 
@@ -117,7 +112,6 @@ Active contracts:
 Active adapters:
 - `packages/adapters-telegram`
 - `packages/adapters-model-pi-agent` (default)
-- `packages/adapters-model-opencode-cli` (legacy)
 - `apps/assistant-core/src/session-store.ts`
 
 Legacy workflow-oriented modules may remain in repo history but are not part of runtime path.
@@ -135,7 +129,6 @@ The codebase uses workspace aliases for clean, resilient imports:
     "@delegate/domain/*": ["packages/domain/src/*"],
     "@delegate/ports/*": ["packages/ports/src/*"],
     "@delegate/adapters-telegram/*": ["packages/adapters-telegram/src/*"],
-    "@delegate/adapters-model-opencode-cli/*": ["packages/adapters-model-opencode-cli/src/*"],
     "@delegate/adapters-model-stub/*": ["packages/adapters-model-stub/src/*"],
     "@delegate/adapters-session-store-sqlite/*": ["packages/adapters-session-store-sqlite/src/*"]
   }
@@ -159,8 +152,7 @@ Primary source:
 
 Key settings:
 - Telegram: token, poll interval
-- Model: provider (`stub|opencode_cli|pi_agent`), pi-agent provider/model/max steps
-- OpenCode (legacy): binary, model, attach URL, auto-start host/port
+- Model: provider (`stub|pi_agent`), pi-agent provider/model/max steps
 - Sessions: idle timeout, max concurrent, retry attempts
 - Relay behavior: timeout, progress first interval, progress repeat interval, progress max count
 - Concurrency: max concurrent topics
