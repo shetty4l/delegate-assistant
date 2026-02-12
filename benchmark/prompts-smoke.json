@@ -1,0 +1,21 @@
+[
+  {
+    "id": "smoke-knowledge",
+    "category": "knowledge",
+    "prompt": "What is the ports and adapters pattern? Explain in 2-3 sentences.",
+    "notes": "Quick knowledge check. Exercises: Ollama bare + Control."
+  },
+  {
+    "id": "smoke-drafting",
+    "category": "drafting",
+    "prompt": "Rewrite this to be more concise: 'I would like to inform you that the process has been completed successfully and there are no remaining issues at this time.'",
+    "notes": "Simple editing task. Exercises: Ollama bare + Control."
+  },
+  {
+    "id": "smoke-memory",
+    "category": "memory",
+    "prompt": "What's our current deployment setup?",
+    "engram_query": "delegate-assistant deployment mac-mini",
+    "notes": "Exercises all 3 code paths: Ollama bare, Ollama + Engram, Control."
+  }
+]
