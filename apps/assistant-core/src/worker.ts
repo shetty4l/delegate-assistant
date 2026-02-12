@@ -62,20 +62,24 @@ const formatTokenCount = (count: number): string => {
   return String(count);
 };
 
-const formatCostFooter = (usage: {
-  inputTokens: number;
-  outputTokens: number;
-  cost: number;
-}): string => {
+const formatCostFooter = (
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+    cost: number;
+  },
+  tier?: string,
+): string => {
   const totalTokens = usage.inputTokens + usage.outputTokens;
+  const tierSuffix = tier ? ` · ${tier.toUpperCase()}` : "";
   if (usage.cost <= 0) {
-    return `\n\n---\n💰 ${formatTokenCount(totalTokens)} tokens`;
+    return `\n\n---\n💰 ${formatTokenCount(totalTokens)} tokens${tierSuffix}`;
   }
   const costStr =
     usage.cost < 0.01
       ? `$${usage.cost.toFixed(4)}`
       : `$${usage.cost.toFixed(2)}`;
-  return `\n\n---\n💰 ${costStr} | ${formatTokenCount(totalTokens)} tokens`;
+  return `\n\n---\n💰 ${costStr} | ${formatTokenCount(totalTokens)} tokens${tierSuffix}`;
 };
 
 export const handleChatMessage = async (
@@ -346,7 +350,8 @@ export const handleChatMessage = async (
           }
 
           const replyText = response.usage
-            ? response.replyText + formatCostFooter(response.usage)
+            ? response.replyText +
+              formatCostFooter(response.usage, response.tier)
             : response.replyText;
 
           await sendMessage(
