@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import type { ModelTurnResponse } from "@delegate/domain";
-import type { RespondInput } from "@delegate/ports";
+import { ModelError } from "@delegate/domain";
+import type { ModelPort, RespondInput } from "@delegate/ports";
 import {
   BehaviorTestHarness,
   DelayedModel,
@@ -102,5 +103,64 @@ describe("relay behaviors", () => {
     expect(replies.length).toBeGreaterThanOrEqual(1);
     const lastReply = replies[replies.length - 1];
     expect(lastReply?.text).toContain("transport/delivery issue");
+  });
+
+  test("tool-call error triggers retry with fresh session and succeeds", async () => {
+    let callCount = 0;
+    const model: ModelPort = {
+      async respond(input: RespondInput): Promise<ModelTurnResponse> {
+        callCount += 1;
+        if (callCount === 1) {
+          throw new ModelError(
+            "internal",
+            "failed_generation: tool call validation failed",
+          );
+        }
+        return {
+          mode: "chat_reply",
+          confidence: 1,
+          replyText: "success after retry",
+          sessionId: input.sessionId ?? "ses-toolcall",
+        };
+      },
+    };
+
+    harness = new BehaviorTestHarness({
+      modelPort: model,
+      relayTimeoutMs: 5000,
+      sessionRetryAttempts: 1,
+    });
+    await harness.start();
+
+    await harness.sendMessage("chat-relay-6", "do something with tools");
+
+    expect(callCount).toBe(2);
+    const replies = harness.getReplies("chat-relay-6");
+    const lastReply = replies[replies.length - 1];
+    expect(lastReply?.text).toContain("success after retry");
+  });
+
+  test("tool-call error with no retries left shows failure message", async () => {
+    const model: ModelPort = {
+      async respond(): Promise<ModelTurnResponse> {
+        throw new ModelError(
+          "internal",
+          "failed_generation: tool call validation failed",
+        );
+      },
+    };
+
+    harness = new BehaviorTestHarness({
+      modelPort: model,
+      relayTimeoutMs: 5000,
+      sessionRetryAttempts: 0,
+    });
+    await harness.start();
+
+    await harness.sendMessage("chat-relay-7", "do something with tools");
+
+    const replies = harness.getReplies("chat-relay-7");
+    const lastReply = replies[replies.length - 1];
+    expect(lastReply?.text).toContain("rejected by the provider");
   });
 });

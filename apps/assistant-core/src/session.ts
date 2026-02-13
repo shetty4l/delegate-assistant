@@ -72,7 +72,7 @@ export const loadSessionId = async (
   }
 
   const persisted = await deps.sessionStore.getSession(sessionKey);
-  if (!persisted) {
+  if (!persisted || persisted.status === "stale") {
     return null;
   }
 

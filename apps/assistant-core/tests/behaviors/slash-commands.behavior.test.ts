@@ -3,7 +3,8 @@ import { mkdtempSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BehaviorTestHarness } from "./test-harness";
+import type { RespondInput } from "@delegate/ports";
+import { BehaviorTestHarness, ContextAwareModel } from "./test-harness";
 
 describe("slash command behaviors", () => {
   test("/start on first interaction shows welcome", async () => {
@@ -102,5 +103,64 @@ describe("slash command behaviors", () => {
     expect(replies.length).toBe(1);
     // Should show the current workspace path (the temp dir from the harness)
     expect(replies[0]?.text).toContain("/");
+  });
+
+  test("/reset confirms session cleared", async () => {
+    const harness = new BehaviorTestHarness();
+    await harness.start();
+
+    await harness.sendMessage("chat-reset-1", "/reset");
+
+    const replies = harness.getReplies("chat-reset-1");
+    expect(replies.length).toBe(1);
+    expect(replies[0]?.text).toContain("Session cleared");
+  });
+
+  test("/reset clears session so next message gets a fresh session", async () => {
+    const sessionIds: Array<string | null | undefined> = [];
+    const model = new ContextAwareModel(async (input: RespondInput) => {
+      sessionIds.push(input.sessionId);
+      return {
+        mode: "chat_reply",
+        confidence: 1,
+        replyText: `echo:${input.text}`,
+        sessionId: input.sessionId ?? "ses-reset-test",
+      };
+    });
+    const harness = new BehaviorTestHarness({ modelPort: model });
+    await harness.start();
+
+    // First message establishes a session
+    await harness.sendMessage("chat-reset-2", "hello");
+    expect(sessionIds.length).toBe(1);
+
+    // Reset clears the session
+    await harness.sendMessage("chat-reset-2", "/reset");
+
+    // Next message should have no session (null = fresh)
+    await harness.sendMessage("chat-reset-2", "hello again");
+    expect(sessionIds.length).toBe(2);
+    expect(sessionIds[1]).toBeNull();
+  });
+
+  test("/reset is case-insensitive", async () => {
+    const harness = new BehaviorTestHarness();
+    await harness.start();
+
+    await harness.sendMessage("chat-reset-3", "/RESET");
+
+    const replies = harness.getReplies("chat-reset-3");
+    expect(replies.length).toBe(1);
+    expect(replies[0]?.text).toContain("Session cleared");
+  });
+
+  test("/reset appears in unknown command help text", async () => {
+    const harness = new BehaviorTestHarness();
+    await harness.start();
+
+    await harness.sendMessage("chat-reset-4", "/unknown");
+
+    const replies = harness.getReplies("chat-reset-4");
+    expect(replies[0]?.text).toContain("/reset");
   });
 });

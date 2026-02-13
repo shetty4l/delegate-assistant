@@ -6,6 +6,7 @@ export type SessionStoreLike = {
   getSession(sessionKey: string): Promise<{
     sessionId: string;
     lastUsedAt: string;
+    status: "active" | "stale";
   } | null>;
   upsertSession(mapping: {
     sessionKey: string;
