@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { handleChatMessage, WorkerContext } from "@assistant-core/src/worker";
 import type { ModelTurnResponse } from "@delegate/domain";
-import type { RespondInput } from "@delegate/ports";
+import type { ModelPort, RespondInput } from "@delegate/ports";
 import {
   BehaviorTestHarness,
   ContextAwareModel,
@@ -165,5 +165,64 @@ describe("session behaviors", () => {
     // Second call should have the session ID restored from SQLite
     expect(callHistory.length).toBe(2);
     expect(callHistory[1]?.sessionId).toBe("ses-persist-1");
+  });
+
+  test("idle eviction calls resetSession on the model adapter", async () => {
+    const resetCalls: string[] = [];
+    const callHistory: RespondInput[] = [];
+
+    const model: ModelPort = {
+      async respond(input: RespondInput): Promise<ModelTurnResponse> {
+        callHistory.push(input);
+        return {
+          mode: "chat_reply",
+          confidence: 1,
+          replyText: `echo:${input.text}`,
+          sessionId: input.sessionId ?? "ses-evict-test",
+        };
+      },
+      async resetSession(sessionKey: string): Promise<void> {
+        resetCalls.push(sessionKey);
+      },
+    };
+
+    const harness = new BehaviorTestHarness({ modelPort: model });
+    await harness.start();
+
+    // Establish a session on topic-a
+    await harness.sendMessage("chat-evict", "hello", "topic-a");
+    expect(callHistory.length).toBe(1);
+    expect(callHistory[0]?.sessionId).toBeNull(); // fresh session
+
+    // Backdate the session so it appears idle
+    const entry = harness.ctx.sessionByKey.get("chat-evict:topic-a");
+    expect(entry).toBeDefined();
+    entry!.lastUsedAt = Date.now() - 60_000; // 60s ago
+
+    // Send a message on a different topic. evictIdleSessions runs at the
+    // start of handleChatMessage and should evict the stale topic-a session.
+    await handleChatMessage(
+      harness.ctx,
+      {
+        chatPort: harness.chatPort,
+        modelPort: model,
+        sessionStore: harness.sessionStore,
+      },
+      {
+        chatId: "chat-evict",
+        threadId: "topic-b",
+        text: "trigger eviction",
+        receivedAt: new Date().toISOString(),
+      },
+      {
+        defaultWorkspacePath: harness.defaultWorkspacePath,
+        buildInfo: defaultBuildInfo,
+        sessionIdleTimeoutMs: 30_000, // 30s — the backdated session (60s ago) qualifies
+      },
+    );
+
+    // resetSession should have been called for the evicted topic-a session
+    expect(resetCalls.length).toBeGreaterThanOrEqual(1);
+    expect(resetCalls).toContain("chat-evict:topic-a");
   });
 });
