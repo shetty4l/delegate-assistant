@@ -26,6 +26,7 @@ export const evictIdleSessions = async (
       continue;
     }
     ctx.sessionByKey.delete(sessionKey);
+    await deps.modelPort.resetSession?.(sessionKey);
     if (deps.sessionStore) {
       await deps.sessionStore.markStale(
         sessionKey,
@@ -47,6 +48,7 @@ export const evictIdleSessions = async (
       break;
     }
     ctx.sessionByKey.delete(evicted[0]);
+    await deps.modelPort.resetSession?.(evicted[0]);
     if (deps.sessionStore) {
       await deps.sessionStore.markStale(
         evicted[0],
