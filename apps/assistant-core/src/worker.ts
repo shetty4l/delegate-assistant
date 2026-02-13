@@ -374,10 +374,9 @@ export const handleChatMessage = async (
             });
           }
 
-          const replyText = response.usage
-            ? response.replyText +
-              formatCostFooter(response.usage, response.tier)
-            : response.replyText;
+          const costFooter = response.usage
+            ? formatCostFooter(response.usage, response.tier)
+            : undefined;
 
           await sendMessage(
             ctx,
@@ -385,7 +384,7 @@ export const handleChatMessage = async (
             {
               chatId: message.chatId,
               threadId: message.threadId ?? null,
-              text: replyText,
+              text: response.replyText,
             },
             {
               action: "relay",
@@ -394,6 +393,7 @@ export const handleChatMessage = async (
               sessionKey,
               workspacePath: activeWorkspacePath,
             },
+            costFooter,
           );
           return;
         } catch (error) {

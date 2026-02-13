@@ -1,3 +1,4 @@
+import { addChunkMetadata, splitMessage } from "@assistant-core/src/chunking";
 import { logInfo } from "@assistant-core/src/logging";
 import type { WorkerContext } from "@assistant-core/src/worker-context";
 import type { LogFields } from "@assistant-core/src/worker-types";
@@ -5,66 +6,68 @@ import { TelegramApiError } from "@delegate/adapters-telegram";
 import type { ChatPort } from "@delegate/ports";
 
 const TELEGRAM_MAX_LENGTH = 4096;
-const TRUNCATION_SUFFIX = "\n\n---\n(Message truncated)";
-const TRUNCATION_TARGET = TELEGRAM_MAX_LENGTH - TRUNCATION_SUFFIX.length;
 
+/**
+ * Send a message to a chat, automatically chunking long text into multiple
+ * Telegram messages. Each chunk fits within 4096 characters and preserves
+ * markdown structure (paragraphs, code fences).
+ *
+ * If costFooter is provided, it is appended to the last chunk only.
+ * Multi-chunk messages get part indicators: " (1/3)", " (2/3)", " (3/3)".
+ */
 export const sendMessage = async (
   ctx: WorkerContext,
   chatPort: ChatPort,
   outbound: { chatId: string; threadId?: string | null; text: string },
   fields: LogFields,
+  costFooter?: string,
 ): Promise<void> => {
-  // Item 6: Truncate messages that exceed Telegram's 4096-char limit
-  let text = outbound.text;
-  if (text.length > TELEGRAM_MAX_LENGTH) {
-    logInfo("chat.message.truncated", {
+  const rawChunks = splitMessage(outbound.text, TELEGRAM_MAX_LENGTH);
+  const chunks = addChunkMetadata(rawChunks, costFooter);
+
+  if (chunks.length > 1) {
+    logInfo("chat.message.chunked", {
       chatId: outbound.chatId,
-      originalLength: text.length,
+      originalLength: outbound.text.length + (costFooter?.length ?? 0),
+      chunks: chunks.length,
     });
-    text = text.slice(0, TRUNCATION_TARGET) + TRUNCATION_SUFFIX;
   }
 
   const threadId =
     outbound.threadId === undefined
       ? (ctx.lastThreadId.get(outbound.chatId) ?? null)
       : outbound.threadId;
-  const payload =
-    threadId === null
-      ? {
-          chatId: outbound.chatId,
-          text,
-        }
-      : {
-          chatId: outbound.chatId,
-          threadId,
-          text,
-        };
 
-  try {
-    await chatPort.send(payload);
-  } catch (error) {
-    const shouldRetryWithoutThread =
-      threadId !== null &&
-      error instanceof TelegramApiError &&
-      error.statusCode === 400;
-    if (!shouldRetryWithoutThread) {
-      throw error;
+  for (let i = 0; i < chunks.length; i += 1) {
+    const text = chunks[i]!;
+    const payload =
+      threadId === null
+        ? { chatId: outbound.chatId, text }
+        : { chatId: outbound.chatId, threadId, text };
+
+    try {
+      await chatPort.send(payload);
+    } catch (error) {
+      const shouldRetryWithoutThread =
+        threadId !== null &&
+        error instanceof TelegramApiError &&
+        error.statusCode === 400;
+      if (!shouldRetryWithoutThread) {
+        throw error;
+      }
+
+      await chatPort.send({ chatId: outbound.chatId, text });
+      logInfo("chat.message.sent_retry_without_thread", {
+        chatId: outbound.chatId,
+        droppedThreadId: threadId,
+        reason: "telegram_400",
+      });
     }
-
-    await chatPort.send({
-      chatId: outbound.chatId,
-      text,
-    });
-    logInfo("chat.message.sent_retry_without_thread", {
-      chatId: outbound.chatId,
-      droppedThreadId: threadId,
-      reason: "telegram_400",
-    });
   }
 
   logInfo("chat.message.sent", {
     chatId: outbound.chatId,
-    chars: text.length,
+    chars: chunks.reduce((sum, c) => sum + c.length, 0),
     ...fields,
   });
 };
