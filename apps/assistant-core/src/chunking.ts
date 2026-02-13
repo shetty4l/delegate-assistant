@@ -10,9 +10,15 @@ const DEFAULT_MAX_LENGTH = 4096;
 
 /**
  * Reserve space for the part indicator suffix " (1/10)" etc.
- * Worst case: " (XX/XX)" = 8 chars. We reserve 10 for safety.
+ * Up to " (XX/XX)" = 8 chars normally. We reserve 10 for safety,
+ * which covers up to 99 chunks (realistic ceiling for a chat bot).
  */
 const PART_INDICATOR_RESERVE = 10;
+
+/**
+ * Extra chars appended when a chunk ends inside a code fence: "\n```" = 4.
+ */
+const FENCE_CLOSE_OVERHEAD = 4;
 
 /**
  * Split text into chunks that each fit within maxLength characters.
@@ -72,8 +78,14 @@ export const splitMessage = (
     remaining = trimmed;
 
     // If we ended inside a code fence, close it in this chunk and
-    // reopen in the next.
+    // reopen in the next. Trim the chunk if closing the fence would
+    // push it over the effective max.
     if (insideFence) {
+      if (chunk.length + FENCE_CLOSE_OVERHEAD > effectiveMax) {
+        const excess = chunk.length + FENCE_CLOSE_OVERHEAD - effectiveMax;
+        remaining = chunk.slice(chunk.length - excess) + remaining;
+        chunk = chunk.slice(0, chunk.length - excess);
+      }
       chunk = `${chunk}\n\`\`\``;
       remaining = `\`\`\`${lang ? lang : ""}\n${remaining}`;
       inCodeBlock = true;

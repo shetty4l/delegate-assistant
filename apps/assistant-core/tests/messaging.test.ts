@@ -110,6 +110,23 @@ describe("splitMessage", () => {
     }
   });
 
+  test("fence closer does not push chunk over limit (hard cut inside code fence)", () => {
+    // A single code block with no newlines — forces a hard cut at effectiveMax
+    // inside the fence. The "\n```" closer (4 chars) must not push the chunk
+    // over maxLength after the part indicator is added.
+    const maxLen = 4096;
+    const codeBody = "x".repeat(maxLen * 3);
+    const text = `\`\`\`typescript\n${codeBody}\n\`\`\``;
+
+    const rawChunks = splitMessage(text, maxLen);
+    const chunks = addChunkMetadata(rawChunks);
+
+    expect(chunks.length).toBeGreaterThan(1);
+    for (const chunk of chunks) {
+      expect(chunk.length).toBeLessThanOrEqual(maxLen);
+    }
+  });
+
   test("reserves extra space on last chunk when lastChunkReserve is set", () => {
     const reserve = 50;
     // Text that just barely doesn't fit in a single chunk with the reserve.

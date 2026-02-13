@@ -57,6 +57,13 @@ export const sendMessage = async (
         error instanceof TelegramApiError &&
         error.statusCode === 400;
       if (!shouldRetryWithoutThread) {
+        if (i > 0) {
+          logInfo("chat.message.partial_send", {
+            chatId: outbound.chatId,
+            chunksSent: i,
+            chunksTotal: chunks.length,
+          });
+        }
         throw error;
       }
 
