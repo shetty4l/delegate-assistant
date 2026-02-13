@@ -393,6 +393,7 @@ export const handleChatMessage = async (
           if (shouldResetSession) {
             sessionId = null;
             ctx.sessionByKey.delete(sessionKey);
+            await deps.modelPort.resetSession?.(sessionKey);
             if (deps.sessionStore) {
               await deps.sessionStore.markStale(sessionKey, nowIso());
             }
@@ -407,6 +408,25 @@ export const handleChatMessage = async (
             shouldResetSession && attempt < sessionRetryAttempts;
           if (shouldRetryFresh) {
             logInfo("relay.retry_fresh_session", {
+              chatId: message.chatId,
+              sessionKey,
+              nextAttempt: attempt + 1,
+            });
+            continue;
+          }
+
+          // 5b: Retry on tool-call validation errors (session is poisoned)
+          if (
+            classification === "tool_call_error" &&
+            attempt < sessionRetryAttempts
+          ) {
+            sessionId = null;
+            ctx.sessionByKey.delete(sessionKey);
+            await deps.modelPort.resetSession?.(sessionKey);
+            if (deps.sessionStore) {
+              await deps.sessionStore.markStale(sessionKey, nowIso());
+            }
+            logInfo("relay.retry_tool_call_error", {
               chatId: message.chatId,
               sessionKey,
               nextAttempt: attempt + 1,

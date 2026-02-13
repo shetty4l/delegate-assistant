@@ -8,6 +8,19 @@ export const classifyRelayError = (error: unknown): RelayErrorClass => {
     if (c === "rate_limit" || c === "capacity") {
       return "model_transient";
     }
+
+    // Tool-call validation errors from the provider (e.g. Groq's failed_generation).
+    // The upstream message is poisoned into agent history — needs a session reset.
+    const msg = error.upstream.toLowerCase();
+    if (
+      msg.includes("failed_generation") ||
+      msg.includes("tool call validation") ||
+      msg.includes("tool_use_failed") ||
+      msg.includes("tool use failed")
+    ) {
+      return "tool_call_error";
+    }
+
     // billing, auth, internal, max_steps, aborted → non-retryable
     return "model_error";
   }
@@ -47,6 +60,9 @@ export const buildRelayFailureText = (
   if (classification === "session_invalid") {
     return "Your previous session expired. I started a fresh session; please retry this request.";
   }
+  if (classification === "tool_call_error") {
+    return "The model's response was rejected by the provider. I've cleared the conversation and will retry.";
+  }
   // 3c: New model-specific messages
   if (classification === "model_error") {
     const upstream =
@@ -54,7 +70,7 @@ export const buildRelayFailureText = (
     return `⚠️ ${error instanceof ModelError ? error.classification : "model"} error from the model provider: ${upstream}`;
   }
   if (classification === "model_transient") {
-    return "The model provider is temporarily unavailable. Retrying...";
+    return "The model provider is temporarily unavailable. Please try again later.";
   }
   return "I hit a transport/delivery issue while relaying this response. Please retry now.";
 };

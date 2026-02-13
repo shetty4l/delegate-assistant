@@ -76,6 +76,7 @@ export type LogFields = Record<string, string | number | boolean | null>;
 
 export type RelayErrorClass =
   | "session_invalid"
+  | "tool_call_error"
   | "timeout"
   | "empty_output"
   | "transport"
