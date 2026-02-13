@@ -28,6 +28,8 @@ export type RespondInput = {
 export interface ModelPort {
   respond(input: RespondInput): Promise<ModelTurnResponse>;
   ping?(): Promise<void>;
+  /** Clear cached session state (agent, messages) for the given key. */
+  resetSession?(sessionKey: string): Promise<void>;
 }
 
 export interface TurnEventSink {

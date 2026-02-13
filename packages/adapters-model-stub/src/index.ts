@@ -28,4 +28,6 @@ export class DeterministicModelStub implements ModelPort {
   }
 
   async ping(): Promise<void> {}
+
+  async resetSession(_sessionKey: string): Promise<void> {}
 }
