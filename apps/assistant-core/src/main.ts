@@ -268,6 +268,11 @@ const runWorkerProcess = async (): Promise<number> => {
 
   const modelPort = buildModelPort();
 
+  // Pre-load Ollama models so the first request doesn't pay cold-start latency.
+  if (modelPort instanceof TieredRouterAdapter) {
+    await modelPort.warmUp();
+  }
+
   await sessionStore.init();
 
   const server = await startWithPortTakeover({

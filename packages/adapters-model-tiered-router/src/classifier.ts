@@ -1,7 +1,7 @@
 import { ollamaChat } from "./ollama-client";
 import type { ClassificationResult, ClassifierConfig } from "./types";
 
-const CLASSIFIER_TIMEOUT_MS = 2_000;
+const CLASSIFIER_TIMEOUT_MS = 5_000;
 
 const CLASSIFIER_SYSTEM_PROMPT = `You are a request classifier for a personal assistant. Analyze the user's message and determine which model tier should handle it.
 
