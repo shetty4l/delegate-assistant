@@ -21,6 +21,7 @@ import {
 } from "@assistant-core/src/session";
 import {
   expandSlashCommand,
+  isResetIntent,
   isRestartIntent,
   isSlashCommand,
 } from "@assistant-core/src/slash-commands";
@@ -245,6 +246,30 @@ export const handleChatMessage = async (
       return;
     }
 
+    if (isResetIntent(message.text)) {
+      const sessionKey = topicKey;
+      ctx.sessionByKey.delete(sessionKey);
+      await deps.modelPort.resetSession?.(sessionKey);
+      if (deps.sessionStore) {
+        await deps.sessionStore.markStale(sessionKey, nowIso());
+      }
+      logInfo("slash.reset", {
+        chatId: message.chatId,
+        sessionKey,
+      });
+      await sendMessage(
+        ctx,
+        deps.chatPort,
+        {
+          chatId: message.chatId,
+          threadId: message.threadId ?? null,
+          text: "Session cleared. Starting fresh.",
+        },
+        { action: "runtime", stage: "session_reset" },
+      );
+      return;
+    }
+
     if (isSlashCommand(message.text)) {
       await sendMessage(
         ctx,
@@ -252,7 +277,7 @@ export const handleChatMessage = async (
         {
           chatId: message.chatId,
           threadId: message.threadId ?? null,
-          text: "Unknown slash command. Supported: /start, /restart, /version, /workspace",
+          text: "Unknown slash command. Supported: /start, /restart, /reset, /version, /workspace",
         },
         { action: "runtime", stage: "unknown_slash" },
       );

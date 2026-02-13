@@ -8,6 +8,9 @@ export const isRestartIntent = (text: string): boolean => {
   );
 };
 
+export const isResetIntent = (text: string): boolean =>
+  /^\/reset$/i.test(text.trim());
+
 export const expandSlashCommand = (text: string): string => {
   const trimmed = text.trim();
   if (trimmed.toLowerCase() === RESTART_COMMAND) {
