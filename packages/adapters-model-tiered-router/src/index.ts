@@ -21,6 +21,7 @@ export type {
 } from "./types";
 
 const HEALTH_CHECK_INTERVAL_MS = 30_000;
+const HEALTH_RECHECK_INTERVAL_MS = 10_000;
 
 type T2Reason =
   | "classifier_unhealthy"
@@ -313,6 +314,84 @@ export class TieredRouterAdapter implements ModelPort {
     await this.memoryQueue.dispose();
   }
 
+  /**
+   * Pre-load models on both Ollama instances so the first real request is fast.
+   *
+   * Sends a trivial chat request to each model, forcing Ollama to load it into
+   * memory. Seeds health state based on the results. Blocks until both complete
+   * (or fail). Call during boot before accepting requests.
+   */
+  async warmUp(): Promise<void> {
+    const WARMUP_MSG: Array<{ role: "user"; content: string }> = [
+      { role: "user", content: "hi" },
+    ];
+
+    const classifierWarmUp = async (): Promise<void> => {
+      const start = performance.now();
+      try {
+        await ollamaChat({
+          url: this.config.classifier.ollamaUrl,
+          model: this.config.classifier.model,
+          messages: WARMUP_MSG,
+          numCtx: this.config.classifier.numCtx,
+          timeoutMs: 15_000,
+        });
+        this.classifierHealth = { healthy: true, lastCheckedAt: Date.now() };
+        const ms = Math.round(performance.now() - start);
+        log("tiered_router.warmup.classifier_ready", {
+          model: this.config.classifier.model,
+          ms,
+        });
+      } catch (err) {
+        this.classifierHealth = {
+          healthy: false,
+          lastCheckedAt: Date.now(),
+          error: err instanceof Error ? err.message : String(err),
+        };
+        logWarn("tiered_router.warmup.classifier_failed", {
+          model: this.config.classifier.model,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    };
+
+    const t1WarmUp = async (): Promise<void> => {
+      const start = performance.now();
+      try {
+        await ollamaChat({
+          url: this.config.t1.ollamaUrl,
+          model: this.config.t1.model,
+          messages: WARMUP_MSG,
+          numCtx: this.config.t1.numCtx,
+          timeoutMs: 30_000,
+        });
+        this.t1Health = { healthy: true, lastCheckedAt: Date.now() };
+        const ms = Math.round(performance.now() - start);
+        log("tiered_router.warmup.t1_ready", {
+          model: this.config.t1.model,
+          ms,
+        });
+      } catch (err) {
+        this.t1Health = {
+          healthy: false,
+          lastCheckedAt: Date.now(),
+          error: err instanceof Error ? err.message : String(err),
+        };
+        logWarn("tiered_router.warmup.t1_failed", {
+          model: this.config.t1.model,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    };
+
+    log("tiered_router.warmup.start", {
+      classifier: `${this.config.classifier.ollamaUrl} (${this.config.classifier.model})`,
+      t1: `${this.config.t1.ollamaUrl} (${this.config.t1.model})`,
+    });
+
+    await Promise.allSettled([classifierWarmUp(), t1WarmUp()]);
+  }
+
   async ping(): Promise<void> {
     const classifierResult = await ollamaHealthCheck(
       this.config.classifier.ollamaUrl,
@@ -368,7 +447,10 @@ export class TieredRouterAdapter implements ModelPort {
     const now = Date.now();
     const age = now - this.engramHealth.lastCheckedAt;
 
-    if (age < HEALTH_CHECK_INTERVAL_MS) {
+    const ttl = this.engramHealth.healthy
+      ? HEALTH_CHECK_INTERVAL_MS
+      : HEALTH_RECHECK_INTERVAL_MS;
+    if (age < ttl) {
       return this.engramHealth.healthy;
     }
 
@@ -417,7 +499,10 @@ export class TieredRouterAdapter implements ModelPort {
     const now = Date.now();
     const age = now - state.lastCheckedAt;
 
-    if (age < HEALTH_CHECK_INTERVAL_MS) {
+    const ttl = state.healthy
+      ? HEALTH_CHECK_INTERVAL_MS
+      : HEALTH_RECHECK_INTERVAL_MS;
+    if (age < ttl) {
       return state.healthy;
     }
 
