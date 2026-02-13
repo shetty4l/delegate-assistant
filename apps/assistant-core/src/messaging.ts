@@ -22,7 +22,11 @@ export const sendMessage = async (
   fields: LogFields,
   costFooter?: string,
 ): Promise<void> => {
-  const rawChunks = splitMessage(outbound.text, TELEGRAM_MAX_LENGTH);
+  const rawChunks = splitMessage(
+    outbound.text,
+    TELEGRAM_MAX_LENGTH,
+    costFooter?.length ?? 0,
+  );
   const chunks = addChunkMetadata(rawChunks, costFooter);
 
   if (chunks.length > 1) {
@@ -33,7 +37,7 @@ export const sendMessage = async (
     });
   }
 
-  const threadId =
+  let threadId =
     outbound.threadId === undefined
       ? (ctx.lastThreadId.get(outbound.chatId) ?? null)
       : outbound.threadId;
@@ -62,6 +66,8 @@ export const sendMessage = async (
         droppedThreadId: threadId,
         reason: "telegram_400",
       });
+      // Clear threadId so remaining chunks don't repeat the failed attempt.
+      threadId = null;
     }
   }
 
