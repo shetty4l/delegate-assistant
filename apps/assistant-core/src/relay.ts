@@ -61,7 +61,7 @@ export const buildRelayFailureText = (
     return "Your previous session expired. I started a fresh session; please retry this request.";
   }
   if (classification === "tool_call_error") {
-    return "The model's response was rejected by the provider. I've cleared the conversation and will retry.";
+    return "The model's response was rejected by the provider. I've cleared the conversation — please try again.";
   }
   // 3c: New model-specific messages
   if (classification === "model_error") {
