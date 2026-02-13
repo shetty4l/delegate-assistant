@@ -22,6 +22,22 @@ describe("classifyRelayError", () => {
     expect(classifyRelayError(err)).toBe("model_error");
   });
 
+  test("classifies ModelError with failed_generation as tool_call_error", () => {
+    const err = new ModelError(
+      "internal",
+      "failed_generation: tool call validation failed",
+    );
+    expect(classifyRelayError(err)).toBe("tool_call_error");
+  });
+
+  test("classifies ModelError with tool_use_failed as tool_call_error", () => {
+    const err = new ModelError(
+      "internal",
+      "tool_use_failed: invalid parameters",
+    );
+    expect(classifyRelayError(err)).toBe("tool_call_error");
+  });
+
   test("classifies ModelError with rate_limit as model_transient", () => {
     const err = new ModelError("rate_limit", "429 Too Many Requests");
     expect(classifyRelayError(err)).toBe("model_transient");
@@ -62,10 +78,15 @@ describe("buildRelayFailureText", () => {
     expect(text).toContain("Insufficient credits");
   });
 
-  test("model_transient returns retry message", () => {
+  test("model_transient returns unavailable message", () => {
     const text = buildRelayFailureText("model_transient", 300_000);
     expect(text).toContain("temporarily unavailable");
-    expect(text).toContain("Retrying");
+    expect(text).toContain("try again later");
+  });
+
+  test("tool_call_error returns rejected message", () => {
+    const text = buildRelayFailureText("tool_call_error", 300_000);
+    expect(text).toContain("rejected by the provider");
   });
 
   test("timeout includes timeout duration", () => {
