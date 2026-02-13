@@ -314,6 +314,11 @@ export class TieredRouterAdapter implements ModelPort {
     await this.memoryQueue.dispose();
   }
 
+  /** Forward session reset to the T2 backend (which caches agents). */
+  async resetSession(sessionKey: string): Promise<void> {
+    await this.config.t2Backend.resetSession?.(sessionKey);
+  }
+
   /**
    * Pre-load models on both Ollama instances so the first real request is fast.
    *

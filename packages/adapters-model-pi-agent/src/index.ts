@@ -354,4 +354,18 @@ export class PiAgentModelAdapter implements ModelPort {
       cached.agent.abort();
     }
   }
+
+  /** Evict a cached agent, forcing fresh creation on the next respond() call. */
+  async resetSession(sessionKey: string): Promise<void> {
+    const deleted = this.agents.delete(sessionKey);
+    if (deleted) {
+      console.log(
+        JSON.stringify({
+          level: "info",
+          event: "pi_agent.session_reset",
+          sessionKey,
+        }),
+      );
+    }
+  }
 }
