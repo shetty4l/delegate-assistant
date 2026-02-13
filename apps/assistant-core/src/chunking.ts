@@ -29,8 +29,9 @@ const PART_INDICATOR_RESERVE = 10;
 export const splitMessage = (
   text: string,
   maxLength: number = DEFAULT_MAX_LENGTH,
+  lastChunkReserve: number = 0,
 ): string[] => {
-  if (text.length <= maxLength) {
+  if (text.length + lastChunkReserve <= maxLength) {
     return [text];
   }
 
@@ -43,8 +44,10 @@ export const splitMessage = (
   let codeLang = "";
 
   while (remaining.length > 0) {
-    // If remaining fits in one chunk, push it and done.
-    if (remaining.length <= effectiveMax) {
+    // If remaining fits in one chunk (accounting for footer on last chunk),
+    // push it and done.
+    const lastChunkMax = effectiveMax - lastChunkReserve;
+    if (remaining.length <= lastChunkMax) {
       chunks.push(remaining);
       break;
     }
@@ -86,6 +89,45 @@ export const splitMessage = (
   }
 
   return chunks;
+};
+
+/**
+ * Search backwards for the last newline that falls outside a code fence.
+ * Returns the index of that newline, or -1 if none found.
+ */
+const findLastNewlineOutsideFence = (
+  window: string,
+  fenceToggles: Array<{ index: number; opens: boolean; lang: string }>,
+  enteredInFence: boolean,
+): number => {
+  // Build an array of regions that are outside fences.
+  let inFence = enteredInFence;
+  let regionStart = 0;
+  const outsideRegions: Array<{ start: number; end: number }> = [];
+
+  for (const toggle of fenceToggles) {
+    if (!inFence) {
+      // We're outside — region from regionStart to toggle.index is outside.
+      outsideRegions.push({ start: regionStart, end: toggle.index });
+    }
+    inFence = toggle.opens;
+    regionStart = toggle.index;
+  }
+  // Remaining region after last toggle.
+  if (!inFence) {
+    outsideRegions.push({ start: regionStart, end: window.length });
+  }
+
+  // Search backwards through outside regions for the last newline.
+  for (let i = outsideRegions.length - 1; i >= 0; i--) {
+    const region = outsideRegions[i]!;
+    const sub = window.slice(region.start, region.end);
+    const idx = sub.lastIndexOf("\n");
+    if (idx >= 0) {
+      return region.start + idx;
+    }
+  }
+  return -1;
 };
 
 /**
@@ -154,23 +196,39 @@ const findSplitPoint = (
 
   // Priority 1: Try to split on a paragraph boundary (\n\n).
   // Search backwards from the end of the window for the last \n\n.
+  // Prefer splitting outside code fences.
   const lastParaBreak = window.lastIndexOf("\n\n");
   if (lastParaBreak > 0) {
     // Split after the double newline.
     const splitAt = lastParaBreak;
     const state = fenceStateAt(splitAt);
-    // Only use paragraph boundary if we're not splitting inside a code block,
-    // or if there's no better option.
     if (!state.insideFence) {
       return { splitIndex: splitAt, ...state };
     }
   }
 
   // Priority 2: Try to split on a line boundary (\n).
+  // Prefer splitting outside code fences when possible.
   const lastLineBreak = window.lastIndexOf("\n");
   if (lastLineBreak > 0) {
     const splitAt = lastLineBreak;
     const state = fenceStateAt(splitAt);
+    if (!state.insideFence) {
+      return { splitIndex: splitAt, ...state };
+    }
+    // Inside a fence — fall through to hard cut only if no outside-fence
+    // line break exists. Otherwise try to find an earlier line break outside
+    // the current fence.
+    const outsideBreak = findLastNewlineOutsideFence(
+      window,
+      fenceToggles,
+      enteredInFence,
+    );
+    if (outsideBreak > 0) {
+      const outsideState = fenceStateAt(outsideBreak);
+      return { splitIndex: outsideBreak, ...outsideState };
+    }
+    // No line break outside a fence — split inside (fence close/reopen handles it).
     return { splitIndex: splitAt, ...state };
   }
 

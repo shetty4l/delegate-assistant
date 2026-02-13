@@ -109,6 +109,27 @@ describe("splitMessage", () => {
       expect(chunk.trim().length).toBeGreaterThan(0);
     }
   });
+
+  test("reserves extra space on last chunk when lastChunkReserve is set", () => {
+    const reserve = 50;
+    // Text that just barely doesn't fit in a single chunk with the reserve.
+    const text = "x".repeat(4096);
+    const chunks = splitMessage(text, 4096, reserve);
+    // Should split because text.length + reserve > maxLength.
+    expect(chunks.length).toBeGreaterThan(1);
+    // Last chunk must leave room for the reserve.
+    const lastChunk = chunks[chunks.length - 1]!;
+    // lastChunk.length + PART_INDICATOR_RESERVE(10) + reserve must fit in 4096.
+    expect(lastChunk.length + 10 + reserve).toBeLessThanOrEqual(4096);
+  });
+
+  test("single chunk when text + reserve fits within maxLength", () => {
+    const text = "x".repeat(4000);
+    const chunks = splitMessage(text, 4096, 50);
+    // 4000 + 50 = 4050 <= 4096, so single chunk.
+    expect(chunks.length).toBe(1);
+    expect(chunks[0]).toBe(text);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -240,5 +261,30 @@ describe("sendMessage chunking", () => {
 
     expect(chatPort.sent.length).toBe(1);
     expect(chatPort.sent[0]!.text).toBe("Short reply\n\n---\n💰 $0.01");
+  });
+
+  test("cost footer does not push any chunk over 4096 chars", async () => {
+    const ctx = new WorkerContext();
+    const chatPort = new CapturingChatPort();
+    // Create text that produces a last chunk near the effective max.
+    // ~8100 chars across two paragraphs, with a ~40-char footer.
+    const text = `${"a".repeat(4050)}\n\n${"b".repeat(4050)}`;
+    const footer = "\n\n---\n💰 $0.05 | 12.5k tokens · T2";
+
+    await sendMessage(
+      ctx,
+      chatPort,
+      { chatId: "c1", text },
+      { action: "test" },
+      footer,
+    );
+
+    expect(chatPort.sent.length).toBeGreaterThan(1);
+    for (const msg of chatPort.sent) {
+      expect(msg.text.length).toBeLessThanOrEqual(4096);
+    }
+    // Footer should still appear on the last chunk.
+    const last = chatPort.sent[chatPort.sent.length - 1]!;
+    expect(last.text).toContain("$0.05");
   });
 });
