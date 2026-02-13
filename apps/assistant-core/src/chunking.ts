@@ -102,7 +102,6 @@ const findSplitPoint = (
 ): { splitIndex: number; insideFence: boolean; lang: string } => {
   // Track code fence state as we scan.
   let inFence = enteredInFence;
-  let lang = enteredLang;
 
   // Scan for code fences to know the state at any position.
   // We collect fence toggle positions so we can determine state at split point.
@@ -120,7 +119,6 @@ const findSplitPoint = (
       // This closes the fence.
       fenceToggles.push({ index: match.index, opens: false, lang: "" });
       inFence = false;
-      lang = "";
     } else {
       // This opens a fence.
       const fenceLang = (match[2] ?? "").trim();
@@ -130,7 +128,6 @@ const findSplitPoint = (
         lang: fenceLang,
       });
       inFence = true;
-      lang = fenceLang;
     }
   }
 
